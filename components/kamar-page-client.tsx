@@ -58,16 +58,19 @@ export type KamarRow = {
 
 type KamarForm = Omit<KamarRow, "id" | "namaPenghuni" | "tglCheckOut">;
 
-const FALLBACK_LOKASI = ["Jakarta Selatan", "Bandung", "Yogyakarta"];
-const FALLBACK_UNIT = ["Blok A", "Blok B", "Blok C"];
-
 function buildLokasiSelectOptions(
   localDemo: boolean,
   kamarRows: KamarRow[],
   penghuniRows: PenghuniSandboxLite[],
   sandboxReady: boolean
 ): string[] {
-  if (!localDemo) return [...FALLBACK_LOKASI];
+  if (!localDemo) {
+    const kamarLokasi = kamarRows.map((r) => r.lokasiKos).filter(Boolean);
+    const penghuniLokasi = penghuniRows.map((p) => p.lokasiKos).filter(Boolean);
+    return Array.from(new Set([...kamarLokasi, ...penghuniLokasi])).sort((a, b) =>
+      a.localeCompare(b, "id")
+    );
+  }
   return buildDemoLokasiList(sandboxReady, kamarRows, penghuniRows);
 }
 
@@ -78,13 +81,25 @@ function buildUnitSelectOptions(
   penghuniRows: PenghuniSandboxLite[],
   sandboxReady: boolean
 ): string[] {
-  if (!localDemo) return [...FALLBACK_UNIT];
+  if (!localDemo) {
+    const fromKamar = kamarRows
+      .filter((r) => !lokasiName || r.lokasiKos === lokasiName)
+      .map((r) => r.unitBlok)
+      .filter(Boolean);
+    const fromPenghuni = penghuniRows
+      .filter((p) => !lokasiName || p.lokasiKos === lokasiName)
+      .map((p) => p.unitBlok)
+      .filter(Boolean);
+    return Array.from(new Set([...fromKamar, ...fromPenghuni])).sort((a, b) =>
+      a.localeCompare(b, "id")
+    );
+  }
   return buildDemoUnitList(sandboxReady, lokasiName, kamarRows, penghuniRows);
 }
 
 const initialForm: KamarForm = {
-  lokasiKos: FALLBACK_LOKASI[0],
-  unitBlok: FALLBACK_UNIT[0],
+  lokasiKos: "",
+  unitBlok: "",
   noKamar: "",
   status: "Available",
   keterangan: "",
@@ -397,7 +412,15 @@ export default function KamarPageClient({
         keterangan: "",
       });
     } else {
-      setForm(initialForm);
+      const loc = buildLokasiSelectOptions(false, data, penghuniSandboxRows, sandboxReady)[0] ?? "";
+      const unit = buildUnitSelectOptions(false, loc, data, penghuniSandboxRows, sandboxReady)[0] ?? "";
+      setForm({
+        lokasiKos: loc,
+        unitBlok: unit,
+        noKamar: "",
+        status: "Available",
+        keterangan: "",
+      });
     }
     setEditingId(null);
   };
@@ -427,6 +450,14 @@ export default function KamarPageClient({
       status: form.status,
       keterangan: form.keterangan,
     };
+
+    if (!form.lokasiKos.trim() || !form.unitBlok.trim()) {
+      const msg = "Lokasi dan unit/blok wajib diisi. Tambahkan Master Lokasi/Blok terlebih dahulu.";
+      setErrorMessage(msg);
+      toast(msg, "error");
+      setIsSubmitting(false);
+      return;
+    }
 
     if (localDemoMode) {
       const row: KamarRow = {
@@ -886,6 +917,9 @@ export default function KamarPageClient({
                       }}
                       className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-4 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
                     >
+                      {lokasiSelectOptions.length === 0 ? (
+                        <option value="">Belum ada lokasi (isi Master Lokasi dulu)</option>
+                      ) : null}
                       {lokasiSelectOptions.map((option) => (
                         <option key={option} value={option}>
                           {option}
@@ -902,6 +936,9 @@ export default function KamarPageClient({
                       onChange={(event) => setForm((prev) => ({ ...prev, unitBlok: event.target.value }))}
                       className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-4 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
                     >
+                      {unitSelectOptions.length === 0 ? (
+                        <option value="">Belum ada unit/blok</option>
+                      ) : null}
                       {unitSelectOptions.map((option) => (
                         <option key={option} value={option}>
                           {option}
