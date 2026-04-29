@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import LaporanPageClient from "@/components/laporan-page-client";
 import type { ReportFinanceRow, ReportKamarRow } from "@/lib/laporan-export-types";
-import type { PenghuniRow } from "@/components/penghuni-page-client";
+import type { PenghuniRow, SurveyCalonRow } from "@/components/penghuni-page-client";
 import { sanitizePenghuniPaymentFlags } from "@/lib/penghuni-finance-payment-sync";
 
 type PenghuniLookup = {
@@ -70,6 +70,21 @@ function mapDbRowToPenghuni(row: Record<string, unknown>): PenghuniRow {
   return sanitizePenghuniPaymentFlags(mapped);
 }
 
+function mapDbRowToSurvey(row: Record<string, unknown>): SurveyCalonRow {
+  return {
+    id: String(row.id ?? ""),
+    namaLengkap: String(row.nama_lengkap ?? ""),
+    lokasiKos: String(row.lokasi_kos ?? ""),
+    unitBlok: String(row.unit_blok ?? ""),
+    periodeSewa: String(row.periode_sewa_bulan ?? "12"),
+    rencanaCheckIn: String(row.tgl_check_in ?? ""),
+    negosiasiHarga: String(row.harga_bulanan ?? ""),
+    noWa: String(row.no_wa ?? ""),
+    keterangan: String(row.keterangan ?? ""),
+    createdAt: row.created_at ? String(row.created_at) : undefined,
+  };
+}
+
 export default async function LaporanPage() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -77,6 +92,7 @@ export default async function LaporanPage() {
   let financeRows: ReportFinanceRow[] = [];
   let kamarRows: ReportKamarRow[] = [];
   let penghuniRows: PenghuniRow[] = [];
+  let surveyRows: SurveyCalonRow[] = [];
   let availableLokasi: string[] = [];
   let availableUnit: string[] = [];
 
@@ -109,9 +125,13 @@ export default async function LaporanPage() {
       mapFinanceRow(row as Record<string, unknown>, penghuniLookupMap)
     );
     kamarRows = (rawKamarRows ?? []).map((row) => mapKamarRow(row as Record<string, unknown>));
-    penghuniRows = (rawPenghuniRows ?? []).map((row) =>
-      mapDbRowToPenghuni(row as Record<string, unknown>)
-    );
+    const allPenghuni = (rawPenghuniRows ?? []) as Array<Record<string, unknown>>;
+    penghuniRows = allPenghuni
+      .filter((row) => String(row.status ?? "").toLowerCase() !== "survey")
+      .map((row) => mapDbRowToPenghuni(row));
+    surveyRows = allPenghuni
+      .filter((row) => String(row.status ?? "").toLowerCase() === "survey")
+      .map((row) => mapDbRowToSurvey(row));
 
     const lokasiSet = new Set<string>();
     const unitSet = new Set<string>();
@@ -143,6 +163,7 @@ export default async function LaporanPage() {
       financeRows={financeRows}
       kamarRows={kamarRows}
       penghuniRows={penghuniRows}
+      surveyRows={surveyRows}
       availableLokasi={availableLokasi}
       availableUnit={availableUnit}
     />

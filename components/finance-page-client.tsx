@@ -699,10 +699,7 @@ export default function FinancePageClient({
         : [row, ...financeData];
       setFinanceData(next);
       writeSandboxJson(SB_KEY.finance, next);
-      toast(
-        editingId ? "Data finance berhasil diperbarui (demo lokal)." : "Transaksi berhasil disimpan (demo lokal).",
-        "success"
-      );
+      toast(editingId ? "Data finance berhasil diperbarui." : "Transaksi berhasil disimpan.", "success");
       resetForm();
       setShowPaymentForm(false);
       setIsSubmitting(false);

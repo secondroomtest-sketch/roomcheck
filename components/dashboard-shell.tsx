@@ -74,10 +74,10 @@ function DashboardShellInner({
       if (localDemoMode) {
         const demo = readDemoProfileSession();
         if (demo) {
-          setProfileName(demo.nama || demo.email || "User Demo");
+          setProfileName(demo.nama || demo.email || "User");
           setProfileRole(demo.role || "staff");
         } else {
-          setProfileName("User Demo");
+          setProfileName("User");
           setProfileRole("staff");
         }
         return;
@@ -148,12 +148,27 @@ function DashboardShellInner({
     <div className={`brand-theme min-h-screen ${wrapperThemeClass} ${isDark ? "dark" : ""}`}>
       <div className="flex min-h-screen">
         <aside
-          className={`hidden w-72 border-r p-6 lg:flex lg:flex-col ${
+          className={`relative hidden w-72 border-r p-6 lg:flex lg:flex-col ${
             isDark
-              ? "border-[#2d315a] bg-[#171a33]"
-              : "border-[#d8defc] bg-[#f8f9ff]"
+              ? "border-[#2d315a] bg-[#16183a]"
+              : "border-[#d8defc] bg-[#eef2ff]"
           }`}
         >
+          <div
+            className={`pointer-events-none absolute inset-0 ${
+              isDark
+                ? "bg-[radial-gradient(circle_at_10%_16%,rgba(167,139,250,0.2),transparent_42%),radial-gradient(circle_at_85%_14%,rgba(59,130,246,0.15),transparent_45%),radial-gradient(circle_at_70%_82%,rgba(109,40,217,0.15),transparent_40%)]"
+                : "bg-[radial-gradient(circle_at_10%_16%,rgba(167,139,250,0.3),transparent_42%),radial-gradient(circle_at_85%_14%,rgba(59,130,246,0.23),transparent_45%),radial-gradient(circle_at_70%_82%,rgba(109,40,217,0.23),transparent_40%)]"
+            }`}
+          />
+          <div
+            className={`pointer-events-none absolute inset-0 ${
+              isDark
+                ? "opacity-90 [background:linear-gradient(145deg,rgba(11,10,29,0.66)_0%,rgba(36,20,74,0.48)_38%,rgba(16,32,88,0.42)_100%)]"
+                : "opacity-70 [background:linear-gradient(145deg,rgba(30,27,75,0.24)_0%,rgba(76,29,149,0.16)_38%,rgba(30,64,175,0.12)_100%)]"
+            }`}
+          />
+          <div className="relative z-10">
           <div className="mb-10 rounded-3xl border border-[#c8d3ff] bg-gradient-to-br from-[#ffffff] to-[#eef2ff] p-4 text-[#33407d] shadow-[0_12px_30px_-18px_rgba(77,109,255,0.45)]">
             <div className="flex items-center justify-center px-2 py-2">
               <Image
@@ -198,20 +213,36 @@ function DashboardShellInner({
               );
             })}
           </nav>
+          </div>
         </aside>
         {mobileNavOpen ? (
-          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[90] lg:hidden" role="dialog" aria-modal="true">
             <button
               type="button"
-              className="absolute inset-0 bg-black/45"
+              className="absolute inset-0 bg-black/55"
               aria-label="Tutup menu"
               onClick={() => setMobileNavOpen(false)}
             />
             <aside
               className={`relative z-10 h-full w-[18rem] border-r p-5 ${
-                isDark ? "border-[#2d315a] bg-[#171a33]" : "border-[#d8defc] bg-[#f8f9ff]"
+                isDark ? "border-[#2d315a] bg-[#16183a]" : "border-[#d8defc] bg-[#eef2ff]"
               }`}
             >
+              <div
+                className={`pointer-events-none absolute inset-0 ${
+                  isDark
+                    ? "bg-[radial-gradient(circle_at_10%_16%,rgba(167,139,250,0.2),transparent_42%),radial-gradient(circle_at_85%_14%,rgba(59,130,246,0.15),transparent_45%),radial-gradient(circle_at_70%_82%,rgba(109,40,217,0.15),transparent_40%)]"
+                    : "bg-[radial-gradient(circle_at_10%_16%,rgba(167,139,250,0.3),transparent_42%),radial-gradient(circle_at_85%_14%,rgba(59,130,246,0.23),transparent_45%),radial-gradient(circle_at_70%_82%,rgba(109,40,217,0.23),transparent_40%)]"
+                }`}
+              />
+              <div
+                className={`pointer-events-none absolute inset-0 ${
+                  isDark
+                    ? "opacity-90 [background:linear-gradient(145deg,rgba(11,10,29,0.66)_0%,rgba(36,20,74,0.48)_38%,rgba(16,32,88,0.42)_100%)]"
+                    : "opacity-70 [background:linear-gradient(145deg,rgba(30,27,75,0.24)_0%,rgba(76,29,149,0.16)_38%,rgba(30,64,175,0.12)_100%)]"
+                }`}
+              />
+              <div className="relative z-10">
               <div className="mb-6 flex items-center justify-between">
                 <p className={`text-sm font-semibold ${isDark ? "text-[#dbe3ff]" : "text-[#3f4f9d]"}`}>Menu</p>
                 <button
@@ -251,11 +282,27 @@ function DashboardShellInner({
                   );
                 })}
               </nav>
+              </div>
             </aside>
           </div>
         ) : null}
 
         <div className="flex min-h-screen flex-1 flex-col">
+          {!mobileNavOpen ? (
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              className={`fixed bottom-4 left-4 z-[85] inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-lg lg:hidden ${
+                isDark
+                  ? "border-[#4b5894] bg-[#202a52] text-[#d6e0ff]"
+                  : "border-[#c6d2ff] bg-white text-[#4457a8]"
+              }`}
+              aria-label="Buka menu navigasi"
+            >
+              <Menu size={14} />
+              Menu
+            </button>
+          ) : null}
           <header
             className={`sticky top-0 z-20 flex items-center justify-between border-b px-5 py-4 backdrop-blur sm:px-8 ${
               isDark
@@ -290,7 +337,7 @@ function DashboardShellInner({
 
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
               <span
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:text-[11px] ${
+                className={`hidden items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline-flex sm:text-[11px] ${
                   isDark
                     ? "border-[#3e477c] bg-[#1f2546] text-[#b8c6ff]"
                     : "border-[#d3dbff] bg-[#f8f9ff] text-[#4a5ba4]"
@@ -298,7 +345,7 @@ function DashboardShellInner({
               >
                 Cloud Mode: Supabase
               </span>
-              <p className="bg-gradient-to-r from-[#4d6dff] via-[#6d32ff] to-[#15c57a] bg-clip-text text-[10px] font-extrabold uppercase tracking-[0.22em] text-transparent sm:text-[11px]">
+              <p className="hidden bg-gradient-to-r from-[#4d6dff] via-[#6d32ff] to-[#15c57a] bg-clip-text text-[10px] font-extrabold uppercase tracking-[0.22em] text-transparent md:block md:text-[11px]">
                 SECOND ROOM KOST MANAGEMENT
               </p>
 

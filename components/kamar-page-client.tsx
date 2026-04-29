@@ -66,7 +66,13 @@ function buildLokasiSelectOptions(
   cloudLokasi: string[]
 ): string[] {
   if (!localDemo) {
-    return Array.from(new Set(cloudLokasi.filter(Boolean))).sort((a, b) => a.localeCompare(b, "id"));
+    const fromMaster = cloudLokasi.filter(Boolean);
+    if (fromMaster.length > 0) {
+      return Array.from(new Set(fromMaster)).sort((a, b) => a.localeCompare(b, "id"));
+    }
+    const fromKamar = kamarRows.map((r) => r.lokasiKos).filter(Boolean);
+    const fromPenghuni = penghuniRows.map((p) => p.lokasiKos).filter(Boolean);
+    return Array.from(new Set([...fromKamar, ...fromPenghuni])).sort((a, b) => a.localeCompare(b, "id"));
   }
   return buildDemoLokasiList(sandboxReady, kamarRows, penghuniRows);
 }
@@ -80,7 +86,19 @@ function buildUnitSelectOptions(
   cloudUnitByLokasi: string[]
 ): string[] {
   if (!localDemo) {
-    return Array.from(new Set(cloudUnitByLokasi.filter(Boolean))).sort((a, b) => a.localeCompare(b, "id"));
+    const fromMaster = cloudUnitByLokasi.filter(Boolean);
+    if (fromMaster.length > 0) {
+      return Array.from(new Set(fromMaster)).sort((a, b) => a.localeCompare(b, "id"));
+    }
+    const fromKamar = kamarRows
+      .filter((r) => !lokasiName || r.lokasiKos === lokasiName)
+      .map((r) => r.unitBlok)
+      .filter(Boolean);
+    const fromPenghuni = penghuniRows
+      .filter((p) => !lokasiName || p.lokasiKos === lokasiName)
+      .map((p) => p.unitBlok)
+      .filter(Boolean);
+    return Array.from(new Set([...fromKamar, ...fromPenghuni])).sort((a, b) => a.localeCompare(b, "id"));
   }
   return buildDemoUnitList(sandboxReady, lokasiName, kamarRows, penghuniRows);
 }
@@ -425,8 +443,8 @@ export default function KamarPageClient({
       supabase
         .from("penghuni")
         .select("status, lokasi_kos, unit_blok, no_kamar, sewa_kamar_paid, nama_lengkap, tgl_check_out"),
-      supabase.from("master_lokasi").select("id, nama_lokasi").order("created_at", { ascending: false }),
-      supabase.from("master_blok").select("lokasi_id, nama_blok").order("created_at", { ascending: false }),
+      supabase.from("master_lokasi").select("*").order("created_at", { ascending: false }),
+      supabase.from("master_blok").select("*").order("created_at", { ascending: false }),
     ]);
 
     if (error) {
@@ -445,7 +463,7 @@ export default function KamarPageClient({
       const lokasiList = (lokasiMasterData as Array<Record<string, unknown>>)
         .map((row) => {
           const id = String(row.id ?? "");
-          const nama = String(row.nama_lokasi ?? "").trim();
+          const nama = String(row.nama_lokasi ?? row.nama ?? "").trim();
           if (id && nama) map[id] = nama;
           return nama;
         })
@@ -456,7 +474,7 @@ export default function KamarPageClient({
     if (!blokMasterErr && blokMasterData) {
       const blokList = (blokMasterData as Array<Record<string, unknown>>).map((row) => ({
         lokasiId: String(row.lokasi_id ?? ""),
-        namaBlok: String(row.nama_blok ?? "").trim(),
+        namaBlok: String(row.nama_blok ?? row.nama ?? "").trim(),
       }));
       setMasterBlokCloud(blokList);
     }
@@ -498,6 +516,12 @@ export default function KamarPageClient({
       toast("Gagal memuat data kamar. Periksa pesan di halaman.", "error");
     }
   };
+
+  useEffect(() => {
+    if (localDemoMode) return;
+    void loadKamar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localDemoMode, masterTick]);
 
   const resetForm = () => {
     if (localDemoMode) {
@@ -592,7 +616,7 @@ export default function KamarPageClient({
         : [row, ...data];
       setData(next);
       writeSandboxJson(SB_KEY.kamar, next);
-      toast(editingId ? "Data kamar berhasil diperbarui (demo lokal)." : "Data kamar berhasil disimpan (demo lokal).", "success");
+      toast(editingId ? "Data kamar berhasil diperbarui." : "Data kamar berhasil disimpan.", "success");
       await loadKamar();
       resetForm();
       setShowKamarSidePanel(false);
@@ -723,11 +747,7 @@ export default function KamarPageClient({
             />
             <p className="mt-2 max-w-2xl text-sm text-[#7f6344] dark:text-[#b79a78]">
               Ringkasan per kamar (empat kolom pada layar lebar). Tambah atau edit lewat panel samping.
-              {localDemoMode ? (
-                <span className="mt-1 block text-xs text-[#a08058]">
-                  Demo lokal: lokasi & blok dari Master (Lokasi/Blok), Kamar, dan Penghuni di browser.
-                </span>
-              ) : null}
+              {null}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

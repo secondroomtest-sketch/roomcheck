@@ -5,7 +5,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 const STORAGE_KEY = "secondroom_local_demo_mode";
 
 type SandboxModeContextValue = {
-  /** true = input disimpan di browser saja, tidak ke Supabase */
   localDemoMode: boolean;
   setLocalDemoMode: (value: boolean) => void;
 };
@@ -22,10 +21,10 @@ export function SandboxModeProvider({ children }: { children: React.ReactNode })
     window.localStorage.setItem(STORAGE_KEY, "false");
   }, []);
 
-  const setLocalDemoMode = useCallback((value: boolean) => {
-    setLocalDemoModeState(value);
+  const setLocalDemoMode = useCallback((_value: boolean) => {
+    setLocalDemoModeState(false);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, String(value));
+      window.localStorage.setItem(STORAGE_KEY, "false");
     }
   }, []);
 

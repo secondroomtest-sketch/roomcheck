@@ -1,79 +1,24 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../libsupabaseClient";
-import { SB_KEY, readSandboxJson } from "@/lib/sandbox-storage";
-import { writeDemoProfileSession } from "@/lib/demo-auth";
-
-const DEMO_MODE_STORAGE_KEY = "secondroom_local_demo_mode";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
   const [credential, setCredential] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [demoModeActive, setDemoModeActive] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const refreshMode = () => {
-      // Cloud-first mode: keep demo off.
-      window.localStorage.setItem(DEMO_MODE_STORAGE_KEY, "false");
-      setDemoModeActive(false);
-    };
-    refreshMode();
-    window.addEventListener("storage", refreshMode);
-    return () => window.removeEventListener("storage", refreshMode);
-  }, []);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage("");
     setIsSubmitting(true);
-
-    const demoMode =
-      typeof window !== "undefined"
-        ? (window.localStorage.getItem(DEMO_MODE_STORAGE_KEY) ?? "false") === "true"
-        : false;
-    if (demoMode) {
-      const blob = readSandboxJson<{ usersData?: Array<Record<string, unknown>> } | null>(
-        SB_KEY.master,
-        null
-      );
-      const users = blob?.usersData ?? [];
-      const hit = users.find((u) => String(u.email ?? "").trim().toLowerCase() === credential.trim().toLowerCase());
-      if (!hit) {
-        setErrorMessage("Akun demo tidak ditemukan di Master > User.");
-        setIsSubmitting(false);
-        return;
-      }
-      const storedPass = String(hit.demoPassword ?? "");
-      if (!storedPass || storedPass !== password) {
-        setErrorMessage("Password demo tidak cocok.");
-        setIsSubmitting(false);
-        return;
-      }
-      writeDemoProfileSession({
-        id: String(hit.id ?? ""),
-        nama: String(hit.nama ?? "User Demo"),
-        email: String(hit.email ?? ""),
-        role: (String(hit.role ?? "staff").toLowerCase() || "staff") as
-          | "super_admin"
-          | "owner"
-          | "staff"
-          | "supervisor"
-          | "manager",
-        aksesLokasi: Array.isArray(hit.aksesLokasi) ? hit.aksesLokasi.map(String) : [],
-        aksesBlok: Array.isArray(hit.aksesBlok) ? hit.aksesBlok.map(String) : [],
-      });
-      router.push("/dashboard");
-      router.refresh();
-      return;
-    }
 
     const { error } = await supabase.auth.signInWithPassword({
       email: credential.trim(),
@@ -91,8 +36,9 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f5f6ff] px-6 py-10 text-[#1f1b42]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(77,109,255,0.2),transparent_42%),radial-gradient(circle_at_85%_10%,rgba(109,50,255,0.14),transparent_35%),radial-gradient(circle_at_80%_80%,rgba(77,109,255,0.2),transparent_38%)]" />
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1a1340] px-6 py-10 text-[#1f1b42]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_18%,rgba(167,139,250,0.38),transparent_46%),radial-gradient(circle_at_88%_12%,rgba(59,130,246,0.3),transparent_42%),radial-gradient(circle_at_76%_82%,rgba(109,40,217,0.32),transparent_48%),radial-gradient(circle_at_24%_78%,rgba(37,99,235,0.22),transparent_40%)]" />
+      <div className="pointer-events-none absolute inset-0 opacity-70 [background:linear-gradient(125deg,rgba(30,27,75,0.5)_0%,rgba(76,29,149,0.35)_28%,rgba(30,64,175,0.28)_58%,rgba(109,40,217,0.4)_100%)]" />
 
       <section className="relative w-full max-w-md rounded-[2rem] border border-[#d8defc]/85 bg-white/85 p-8 shadow-[0_25px_80px_-35px_rgba(63,79,157,0.45)] backdrop-blur-sm sm:p-10">
         <div className="mb-10 space-y-5 text-center">
@@ -120,15 +66,9 @@ export default function LoginPage() {
         </div>
 
         <form className="space-y-6" onSubmit={handleLogin}>
-          {demoModeActive ? (
-            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              Mode demo aktif: login menggunakan data user dari Master lokal (browser), bukan Supabase cloud.
-            </p>
-          ) : (
-            <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-              Mode cloud aktif: login menggunakan akun Supabase.
-            </p>
-          )}
+          <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+            Login menggunakan akun Supabase.
+          </p>
           <div className="space-y-2">
             <label
               htmlFor="credential"
@@ -154,15 +94,25 @@ export default function LoginPage() {
             >
               Password
             </label>
-            <input
-              id="password"
-              type="password"
-              required
-              placeholder="Masukkan password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-2xl border border-[#d5ddff] bg-[#f8f9ff] px-4 py-3 text-sm text-[#1f1b42] outline-none ring-[#8ea2ff] transition focus:ring-2"
-            />
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                required
+                placeholder="Masukkan password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full rounded-2xl border border-[#d5ddff] bg-[#f8f9ff] px-4 py-3 pr-11 text-sm text-[#1f1b42] outline-none ring-[#8ea2ff] transition focus:ring-2"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-[#5d6fc0] transition hover:bg-[#e9eeff] hover:text-[#3f4f9d]"
+                aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
 
           <div className="flex justify-end">

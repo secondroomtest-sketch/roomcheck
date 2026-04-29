@@ -242,7 +242,7 @@ export default function LaporanCetakClient() {
               </div>
               <div>
                 <dt className="font-semibold text-[#6b5238]">Sumber data</dt>
-                <dd>{payload.localDemoMode ? "Demo lokal (browser)" : "Supabase (cloud)"}</dd>
+                <dd>Supabase (cloud)</dd>
               </div>
               <div>
                 <dt className="font-semibold text-[#6b5238]">Periode finance</dt>

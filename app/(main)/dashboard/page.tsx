@@ -188,6 +188,10 @@ export default function DashboardPage() {
   const ownerPnlToastKeyRef = useRef("");
   /** After mount, baca localStorage — sebelum itu samakan dengan SSR agar tidak hydration mismatch */
   const [sandboxReady, setSandboxReady] = useState(false);
+  const [cloudKamarRows, setCloudKamarRows] = useState<KamarRow[]>([]);
+  const [cloudPenghuniRows, setCloudPenghuniRows] = useState<PenghuniRow[]>([]);
+  const [cloudSurveyRows, setCloudSurveyRows] = useState<SurveyCalonRow[]>([]);
+  const [cloudFinanceRows, setCloudFinanceRows] = useState<FinanceRow[]>([]);
 
   useEffect(() => {
     setSandboxReady(true);
@@ -201,14 +205,16 @@ export default function DashboardPage() {
   }, []);
 
   const kamarRows = useMemo(() => {
-    if (!localDemoMode || !sandboxReady) return [] as KamarRow[];
+    if (!localDemoMode) return cloudKamarRows;
+    if (!sandboxReady) return [] as KamarRow[];
     return readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
-  }, [localDemoMode, sandboxReady, sandboxRev]);
+  }, [localDemoMode, sandboxReady, sandboxRev, cloudKamarRows]);
 
   const penghuniRows = useMemo(() => {
-    if (!localDemoMode || !sandboxReady) return [] as PenghuniRow[];
+    if (!localDemoMode) return cloudPenghuniRows;
+    if (!sandboxReady) return [] as PenghuniRow[];
     return readSandboxJson<PenghuniRow[]>(SB_KEY.penghuni, []);
-  }, [localDemoMode, sandboxReady, sandboxRev]);
+  }, [localDemoMode, sandboxReady, sandboxRev, cloudPenghuniRows]);
 
   const kamarRowsSynced = useMemo(
     () => syncKamarRowsWithPenghuniList(kamarRows, penghuniRows),
@@ -216,14 +222,16 @@ export default function DashboardPage() {
   );
 
   const surveyCalonRows = useMemo(() => {
-    if (!localDemoMode || !sandboxReady) return [] as SurveyCalonRow[];
+    if (!localDemoMode) return cloudSurveyRows;
+    if (!sandboxReady) return [] as SurveyCalonRow[];
     return readSandboxJson<SurveyCalonRow[]>(SB_KEY.surveyCalon, []);
-  }, [localDemoMode, sandboxReady, sandboxRev]);
+  }, [localDemoMode, sandboxReady, sandboxRev, cloudSurveyRows]);
 
   const financeRows = useMemo(() => {
-    if (!localDemoMode || !sandboxReady) return [] as FinanceRow[];
+    if (!localDemoMode) return cloudFinanceRows;
+    if (!sandboxReady) return [] as FinanceRow[];
     return readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
-  }, [localDemoMode, sandboxReady, sandboxRev]);
+  }, [localDemoMode, sandboxReady, sandboxRev, cloudFinanceRows]);
 
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [profileRole, setProfileRole] = useState("staff");
@@ -322,6 +330,100 @@ export default function DashboardPage() {
       );
     };
     void loadMaster();
+    return () => {
+      cancelled = true;
+    };
+  }, [localDemoMode]);
+
+  useEffect(() => {
+    if (localDemoMode) {
+      setCloudKamarRows([]);
+      setCloudPenghuniRows([]);
+      setCloudSurveyRows([]);
+      setCloudFinanceRows([]);
+      return;
+    }
+    let cancelled = false;
+    const mapFinance = (row: Record<string, unknown>): FinanceRow => ({
+      id: String(row.id ?? ""),
+      noNota: String(row.no_nota ?? ""),
+      kategori: String(row.kategori ?? "").toLowerCase() === "pengeluaran" ? "Pengeluaran" : "Pemasukan",
+      pos: String(row.pos ?? ""),
+      tanggal: String(row.tanggal ?? ""),
+      namaPenghuni: String(row.nama_penghuni ?? ""),
+      lokasiKos: String(row.lokasi_kos ?? ""),
+      unitBlok: String(row.unit_blok ?? ""),
+      nominal: String(row.nominal ?? ""),
+      keterangan: String(row.keterangan ?? ""),
+      pelaporanBulan: String(row.pelaporan_bulan ?? ""),
+      paymentSplitGroupId: String(row.payment_split_group_id ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+    });
+    const mapKamar = (row: Record<string, unknown>): KamarRow => {
+      const statusRaw = String(row.status ?? "Available");
+      const status: KamarRow["status"] =
+        statusRaw === "Occupied" || statusRaw === "Maintenance" ? statusRaw : "Available";
+      return {
+        id: String(row.id ?? ""),
+        lokasiKos: String(row.lokasi_kos ?? ""),
+        unitBlok: String(row.unit_blok ?? ""),
+        noKamar: String(row.no_kamar ?? ""),
+        status,
+        keterangan: String(row.keterangan ?? ""),
+        namaPenghuni: String(row.nama_penghuni ?? "-"),
+        tglCheckOut: String(row.tgl_check_out ?? "-"),
+      };
+    };
+    const mapPenghuni = (row: Record<string, unknown>): PenghuniRow => ({
+      id: String(row.id ?? ""),
+      namaLengkap: String(row.nama_lengkap ?? ""),
+      lokasiKos: String(row.lokasi_kos ?? ""),
+      unitBlok: String(row.unit_blok ?? ""),
+      noKamar: String(row.no_kamar ?? ""),
+      periodeSewa: String(row.periode_sewa_bulan ?? ""),
+      tglCheckIn: String(row.tgl_check_in ?? ""),
+      tglCheckOut: String(row.tgl_check_out ?? ""),
+      hargaBulanan: String(row.harga_bulanan ?? ""),
+      bookingFee: String(row.booking_fee ?? ""),
+      noWa: String(row.no_wa ?? ""),
+      status: String(row.status ?? "").toLowerCase() === "stay" ? "Stay" : "Booking",
+      keterangan: String(row.keterangan ?? ""),
+      createdAt: row.created_at ? String(row.created_at) : null,
+    });
+    const mapSurvey = (row: Record<string, unknown>): SurveyCalonRow => ({
+      id: String(row.id ?? ""),
+      namaLengkap: String(row.nama_lengkap ?? ""),
+      lokasiKos: String(row.lokasi_kos ?? ""),
+      unitBlok: String(row.unit_blok ?? ""),
+      periodeSewa: String(row.periode_sewa_bulan ?? "12"),
+      rencanaCheckIn: String(row.tgl_check_in ?? ""),
+      negosiasiHarga: String(row.harga_bulanan ?? ""),
+      noWa: String(row.no_wa ?? ""),
+      keterangan: String(row.keterangan ?? ""),
+      createdAt: row.created_at ? String(row.created_at) : undefined,
+    });
+    const loadCloudRows = async () => {
+      const [kamarRes, penghuniRes, financeRes] = await Promise.all([
+        supabase.from("kamar").select("*"),
+        supabase.from("penghuni").select("*"),
+        supabase.from("finance").select("*"),
+      ]);
+      if (cancelled) return;
+      const allPenghuni = (penghuniRes.data ?? []) as Array<Record<string, unknown>>;
+      setCloudKamarRows((kamarRes.data ?? []).map((r) => mapKamar(r as Record<string, unknown>)));
+      setCloudPenghuniRows(
+        allPenghuni
+          .filter((r) => String(r.status ?? "").toLowerCase() !== "survey")
+          .map((r) => mapPenghuni(r))
+      );
+      setCloudSurveyRows(
+        allPenghuni
+          .filter((r) => String(r.status ?? "").toLowerCase() === "survey")
+          .map((r) => mapSurvey(r))
+      );
+      setCloudFinanceRows((financeRes.data ?? []).map((r) => mapFinance(r as Record<string, unknown>)));
+    };
+    void loadCloudRows();
     return () => {
       cancelled = true;
     };
@@ -516,7 +618,6 @@ export default function DashboardPage() {
   }, [localDemoMode, kamarRowsSynced, selectedLokasi, selectedUnit, isOwnerRole, penghuniForTable]);
 
   const surveyDashboardRows = useMemo(() => {
-    if (!localDemoMode) return [] as SurveyCalonRow[];
     let rows = [...surveyCalonRows];
     if (lokasiFilterActive(selectedLokasi)) {
       rows = rows.filter((r) => r.lokasiKos === selectedLokasi);
@@ -529,7 +630,7 @@ export default function DashboardPage() {
     }
     const sortKey = (d: string) => (d && String(d).trim() ? String(d) : "9999-12-31");
     return rows.sort((a, b) => sortKey(a.rencanaCheckIn).localeCompare(sortKey(b.rencanaCheckIn)));
-  }, [localDemoMode, surveyCalonRows, selectedLokasi, selectedUnit, isOwnerRole, ownerPnlMonth]);
+  }, [surveyCalonRows, selectedLokasi, selectedUnit, isOwnerRole, ownerPnlMonth]);
 
   const displayStats = useMemo(() => {
     if (!localDemoMode) return [];
@@ -551,7 +652,7 @@ export default function DashboardPage() {
       {
         label: "Kamar Occupied",
         value: String(occ),
-        note: total ? `${occ} dari ${total} kamar (demo)` : "Belum ada data kamar demo",
+        note: total ? `${occ} dari ${total} kamar` : "Belum ada data kamar",
         icon: Building2,
       },
       {
@@ -585,7 +686,7 @@ export default function DashboardPage() {
             ? ownerNoDataForMonth
               ? `Data P&L ${ownerPnlMonth} tidak ditemukan pada filter saat ini`
               : `${revenueRows.length} transaksi · P&L ${ownerPnlMonth} (deposit/booking tidak dijumlahkan)`
-            : `${pemasukanRows.length} transaksi demo`,
+            : `${pemasukanRows.length} transaksi`,
         icon: BadgeDollarSign,
       },
     ];
@@ -732,8 +833,8 @@ export default function DashboardPage() {
             </h1>
             <p className="mt-2 text-sm text-[#725a3d] dark:text-[#c0a783]">
               {localDemoMode
-                ? "Angka dan tabel di bawah mengikuti data demo lokal (Penghuni, Kamar, Finance) di browser Anda."
-                : "Aktifkan demo lokal di header untuk melihat ringkasan dari data yang Anda isi, atau hubungkan ke Supabase untuk data cloud."}
+                ? "Angka dan tabel di bawah menampilkan data operasional saat ini."
+                : "Data dashboard ditampilkan dari Supabase."}
             </p>
           </div>
 
@@ -800,10 +901,10 @@ export default function DashboardPage() {
           </p>
           <p className="mt-1 text-xs text-[#816344] dark:text-[#bfa27f]">
             {localDemoMode && kamarRows.length > 0
-              ? `${kamarRowsFiltered.filter((k) => k.status === "Occupied").length} dari ${kamarRowsFiltered.length} kamar terisi (demo, sesuai filter lokasi/unit)`
+              ? `${kamarRowsFiltered.filter((k) => k.status === "Occupied").length} dari ${kamarRowsFiltered.length} kamar terisi`
               : localDemoMode
-                ? "Tambah data kamar di halaman Kamar (demo)."
-                : "Okupansi tersedia saat demo lokal aktif."}
+                ? "Tambah data kamar di halaman Kamar."
+                : "Data okupansi belum tersedia."}
           </p>
         </div>
 
@@ -957,8 +1058,8 @@ export default function DashboardPage() {
                               ? "Tidak ada penghuni dengan tanggal check-out yang sudah lewat untuk filter ini."
                               : penghuniListFilter === "booking"
                                 ? "Tidak ada penghuni dengan status Booking untuk filter ini."
-                                : "Belum ada penghuni demo atau tidak cocok filter lokasi/unit."
-                        : "Aktifkan demo lokal untuk melihat data penghuni dari browser."}
+                                : "Belum ada penghuni atau tidak cocok filter lokasi/unit."
+                        : "Belum ada data penghuni."}
                     </td>
                   </tr>
                 ) : null}
@@ -976,7 +1077,7 @@ export default function DashboardPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <SectionTitleWithIcon
               icon={ClipboardList}
-              title="Calon survey (sinkron demo)"
+              title="Calon survey"
               className="text-[#2d2217] dark:text-[#f6e9d5]"
               iconClassName={iconTone.warning}
             />
@@ -1016,8 +1117,8 @@ export default function DashboardPage() {
                       {localDemoMode
                         ? isOwnerRole
                           ? `Tidak ada data survey untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : "Belum ada survey demo atau tidak cocok filter lokasi/unit."
-                        : "Aktifkan demo lokal untuk melihat data survey."}
+                          : "Belum ada survey atau tidak cocok filter lokasi/unit."
+                        : "Belum ada data survey."}
                     </td>
                   </tr>
                 ) : null}
@@ -1026,7 +1127,7 @@ export default function DashboardPage() {
           </div>
           <div className="mt-3 flex justify-end">
             <span className="rounded-full border border-amber-300/80 bg-amber-100/80 px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
-              {localDemoMode ? `Total: ${surveyDashboardRows.length}` : "Demo mati"}
+              {`Total: ${surveyDashboardRows.length}`}
             </span>
           </div>
         </article>
@@ -1070,8 +1171,8 @@ export default function DashboardPage() {
                       {localDemoMode
                         ? isOwnerRole
                           ? `Tidak ada data pengeluaran untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : "Belum ada pengeluaran demo atau tidak cocok filter."
-                        : "Aktifkan demo lokal untuk melihat finance demo."}
+                          : "Belum ada pengeluaran atau tidak cocok filter."
+                        : "Belum ada data pengeluaran."}
                     </td>
                   </tr>
                 ) : null}
@@ -1124,8 +1225,8 @@ export default function DashboardPage() {
                       {localDemoMode
                         ? isOwnerRole
                           ? `Tidak ada data pemasukan untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : "Belum ada pemasukan demo atau tidak cocok filter."
-                        : "Aktifkan demo lokal untuk melihat finance demo."}
+                          : "Belum ada pemasukan atau tidak cocok filter."
+                        : "Belum ada data pemasukan."}
                     </td>
                   </tr>
                 ) : null}

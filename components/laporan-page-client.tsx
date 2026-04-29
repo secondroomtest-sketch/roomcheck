@@ -67,12 +67,14 @@ export default function LaporanPageClient({
   financeRows,
   kamarRows,
   penghuniRows: penghuniRowsProp,
+  surveyRows: surveyRowsProp,
   availableLokasi,
   availableUnit,
 }: {
   financeRows: ReportFinanceRow[];
   kamarRows: ReportKamarRow[];
   penghuniRows: PenghuniRow[];
+  surveyRows: SurveyCalonRow[];
   availableLokasi: string[];
   availableUnit: string[];
 }) {
@@ -82,6 +84,7 @@ export default function LaporanPageClient({
   /** Nama tampilan ekspor: dari profil login / email (bukan string statis). */
   const [exportUserName, setExportUserName] = useState("");
   const [sandboxRev, setSandboxRev] = useState(0);
+  const [cloudSurveyRows, setCloudSurveyRows] = useState<SurveyCalonRow[]>([]);
   /** Samakan SSR & hydration: jangan baca localStorage sandbox sebelum mount (lihat dashboard). */
   const [sandboxReady, setSandboxReady] = useState(false);
   /** Hindari render Recharts saat prerender server (mencegah width/height -1). */
@@ -125,6 +128,43 @@ export default function LaporanPageClient({
       cancelled = true;
     };
   }, [localDemoMode]);
+
+  useEffect(() => {
+    if (localDemoMode) {
+      setCloudSurveyRows([]);
+      return;
+    }
+    let cancelled = false;
+    const loadSurveyCloud = async () => {
+      const { data, error } = await supabase
+        .from("penghuni")
+        .select("id, nama_lengkap, lokasi_kos, unit_blok, periode_sewa_bulan, tgl_check_in, harga_bulanan, no_wa, keterangan, created_at, status")
+        .eq("status", "Survey")
+        .order("created_at", { ascending: false });
+      if (cancelled || error) return;
+      setCloudSurveyRows(
+        (data ?? []).map((row) => {
+          const rec = row as Record<string, unknown>;
+          return {
+            id: String(rec.id ?? ""),
+            namaLengkap: String(rec.nama_lengkap ?? ""),
+            lokasiKos: String(rec.lokasi_kos ?? ""),
+            unitBlok: String(rec.unit_blok ?? ""),
+            periodeSewa: String(rec.periode_sewa_bulan ?? "12"),
+            rencanaCheckIn: String(rec.tgl_check_in ?? ""),
+            negosiasiHarga: String(rec.harga_bulanan ?? ""),
+            noWa: String(rec.no_wa ?? ""),
+            keterangan: String(rec.keterangan ?? ""),
+            createdAt: rec.created_at ? String(rec.created_at) : undefined,
+          } satisfies SurveyCalonRow;
+        })
+      );
+    };
+    void loadSurveyCloud();
+    return () => {
+      cancelled = true;
+    };
+  }, [localDemoMode]);
   const today = new Date();
   const defaultEnd = today.toISOString().slice(0, 10);
   const defaultStartDate = new Date(today);
@@ -158,10 +198,10 @@ export default function LaporanPageClient({
   }, [localDemoMode, sandboxReady, penghuniRowsProp, sandboxRev]);
 
   const effectiveSurveyRows = useMemo(() => {
-    if (!localDemoMode) return [] as SurveyCalonRow[];
+    if (!localDemoMode) return cloudSurveyRows;
     if (!sandboxReady) return [];
     return readSandboxJson<SurveyCalonRow[]>(SB_KEY.surveyCalon, []);
-  }, [localDemoMode, sandboxReady, sandboxRev]);
+  }, [localDemoMode, sandboxReady, sandboxRev, cloudSurveyRows]);
   const effectiveAvailableLokasi = useMemo(
     () =>
       Array.from(

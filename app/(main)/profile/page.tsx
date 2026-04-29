@@ -117,8 +117,8 @@ export default function ProfilePage() {
         email: form.email,
         noHp: form.noHp,
       });
-      setSuccessMessage("Profil disimpan di browser (demo lokal), tidak ke Supabase.");
-      toast("Profil berhasil disimpan (demo lokal).", "success");
+      setSuccessMessage("Profil berhasil disimpan.");
+      toast("Profil berhasil disimpan.", "success");
       setIsSubmitting(false);
       return;
     }
@@ -250,15 +250,7 @@ export default function ProfilePage() {
               type="submit"
               disabled={isSubmitting}
               iconClassName={iconTone.success}
-              label={
-                localDemoMode
-                  ? isSubmitting
-                    ? "Menyimpan..."
-                    : "Simpan (demo lokal)"
-                  : isSubmitting
-                    ? "Updating..."
-                    : "Update Profile"
-              }
+              label={isSubmitting ? "Updating..." : "Update Profile"}
               className="rounded-full bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-7 py-2.5 text-sm font-semibold tracking-[0.14em] text-[#eef3ff] disabled:opacity-70"
             />
           </form>

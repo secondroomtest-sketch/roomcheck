@@ -367,6 +367,11 @@ export default function MasterPageClient({
     return true;
   };
 
+  useEffect(() => {
+    if (localDemoMode) return;
+    void refreshAll();
+  }, [localDemoMode]);
+
   const submitFinanceKategori = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     resetMessages();
@@ -387,8 +392,8 @@ export default function MasterPageClient({
       persistMasterFull(nextFinance, lokasiData, blokData, usersData);
       setFinanceForm({ tipe: "Pemasukan", namaPos: "" });
       setEditingFinanceId(null);
-      setSuccessMessage("Finance master (demo lokal) disimpan.");
-      toast("Data finance master berhasil disimpan (demo lokal).", "success");
+      setSuccessMessage("Finance master berhasil disimpan.");
+      toast("Data finance master berhasil disimpan.", "success");
       setIsLoading(false);
       return;
     }
@@ -432,8 +437,8 @@ export default function MasterPageClient({
       }
       setLokasiForm({ namaLokasi: "" });
       setEditingLokasiId(null);
-      setSuccessMessage("Master lokasi (demo lokal) disimpan.");
-      toast("Master lokasi berhasil disimpan (demo lokal).", "success");
+      setSuccessMessage("Master lokasi berhasil disimpan.");
+      toast("Master lokasi berhasil disimpan.", "success");
       setIsLoading(false);
       return;
     }
@@ -481,8 +486,8 @@ export default function MasterPageClient({
       persistMasterFull(financeData, lokasiData, nextB, usersData);
       setBlokForm((prev) => ({ ...prev, namaBlok: "" }));
       setEditingBlokId(null);
-      setSuccessMessage("Master blok/unit (demo lokal) disimpan.");
-      toast("Master blok/unit berhasil disimpan (demo lokal).", "success");
+      setSuccessMessage("Master blok/unit berhasil disimpan.");
+      toast("Master blok/unit berhasil disimpan.", "success");
       setIsLoading(false);
       return;
     }
@@ -706,8 +711,8 @@ export default function MasterPageClient({
           });
           setUsersData(nextU);
           persistMasterFull(financeData, lokasiData, blokData, nextU);
-          setSuccessMessage("Data user diperbarui (demo lokal).");
-          toast("Data user berhasil diperbarui (demo lokal).", "success");
+          setSuccessMessage("Data user diperbarui.");
+          toast("Data user berhasil diperbarui.", "success");
         } else {
           const newRow: UserProfileRow = {
             id: newSandboxId(),
@@ -722,8 +727,8 @@ export default function MasterPageClient({
           const nextU = [newRow, ...usersData];
           setUsersData(nextU);
           persistMasterFull(financeData, lokasiData, blokData, nextU);
-          setSuccessMessage("User baru ditambahkan (demo lokal).");
-          toast("User baru berhasil ditambahkan (demo lokal).", "success");
+          setSuccessMessage("User baru ditambahkan.");
+          toast("User baru berhasil ditambahkan.", "success");
         }
         resetUserForm();
         setIsLoading(false);
@@ -769,11 +774,11 @@ export default function MasterPageClient({
         const nextU = usersData.filter((u) => u.id !== row.id);
         setUsersData(nextU);
         persistMasterFull(financeData, lokasiData, blokData, nextU);
-        setSuccessMessage("User dihapus (demo lokal).");
+        setSuccessMessage("User dihapus.");
         if (editingUserId === row.id) {
           resetUserForm();
         }
-        toast("User berhasil dihapus (demo lokal).", "success");
+        toast("User berhasil dihapus.", "success");
         setIsLoading(false);
         return;
       }
@@ -819,11 +824,7 @@ export default function MasterPageClient({
           {successMessage}
         </p>
       ) : null}
-      {localDemoMode ? (
-        <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-100">
-          Perubahan Master disimpan di browser (demo lokal), tidak ke Supabase.
-        </p>
-      ) : null}
+      {null}
 
       {activeTab === "finance" ? (
         <div className="grid gap-5 lg:grid-cols-2">
@@ -1062,20 +1063,13 @@ export default function MasterPageClient({
               iconClassName={iconTone.info}
               className="mb-1"
             />
-            {localDemoMode ? (
-              <p className="mb-4 text-xs text-[#5d6fc0] dark:text-[#dbe3ff]">
-                Mode demo lokal: user disimpan di browser. Matikan demo lokal dan gunakan akun super_admin +
-                service role untuk menyimpan user ke Supabase.
-              </p>
-            ) : (
-              <p className="mb-4 text-xs text-[#5d6fc0] dark:text-[#dbe3ff]">
-                Hanya akun super_admin yang dapat menambah, mengubah, atau menghapus user. Tambahkan{" "}
-                <code className="rounded bg-[#eef2ff] px-1 py-0.5 text-[0.65rem] dark:bg-[#1b1f3d]">
-                  SUPABASE_SERVICE_ROLE_KEY
-                </code>{" "}
-                di server agar pembuatan password berfungsi.
-              </p>
-            )}
+            <p className="mb-4 text-xs text-[#5d6fc0] dark:text-[#dbe3ff]">
+              Hanya akun super_admin yang dapat menambah, mengubah, atau menghapus user. Tambahkan{" "}
+              <code className="rounded bg-[#eef2ff] px-1 py-0.5 text-[0.65rem] dark:bg-[#1b1f3d]">
+                SUPABASE_SERVICE_ROLE_KEY
+              </code>{" "}
+              di server agar pembuatan password berfungsi.
+            </p>
             <form className="space-y-4" onSubmit={submitUserMaster}>
               <div>
                 <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Nama</label>

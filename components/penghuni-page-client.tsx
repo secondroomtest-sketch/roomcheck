@@ -85,10 +85,6 @@ export type SurveyCalonRow = {
 type PenghuniForm = Omit<PenghuniRow, "id" | "createdAt">;
 type SurveyCalonForm = Omit<SurveyCalonRow, "id" | "createdAt">;
 
-/** Hanya dipakai saat demo lokal mati (placeholder sampai data Supabase). */
-const CLOUD_FALLBACK_LOKASI = ["Jakarta Selatan", "Bandung", "Yogyakarta"];
-const CLOUD_FALLBACK_UNIT = ["Blok A", "Blok B", "Blok C"];
-
 function formatRupiahInput(value: string) {
   const digitsOnly = value.replace(/\D/g, "");
   if (!digitsOnly) return "";
@@ -193,6 +189,21 @@ function sortDateKey(value: string) {
   return Number.isNaN(t) ? 0 : t;
 }
 
+function mapDbRowToSurvey(row: Record<string, unknown>): SurveyCalonRow {
+  return {
+    id: String(row.id ?? ""),
+    namaLengkap: String(row.nama_lengkap ?? ""),
+    lokasiKos: String(row.lokasi_kos ?? ""),
+    unitBlok: String(row.unit_blok ?? ""),
+    periodeSewa: String(row.periode_sewa_bulan ?? "12"),
+    rencanaCheckIn: String(row.tgl_check_in ?? ""),
+    negosiasiHarga: formatRupiahInput(String(row.harga_bulanan ?? "")),
+    noWa: String(row.no_wa ?? ""),
+    keterangan: String(row.keterangan ?? ""),
+    createdAt: row.created_at ? String(row.created_at) : undefined,
+  };
+}
+
 export default function PenghuniPageClient({
   initialData,
   initialKamarRows = [],
@@ -222,6 +233,9 @@ export default function PenghuniPageClient({
   }));
   const [data, setData] = useState<PenghuniRow[]>(initialData);
   const [cloudKamarRows, setCloudKamarRows] = useState<KamarRow[]>(initialKamarRows);
+  const [cloudLokasiOptions, setCloudLokasiOptions] = useState<string[]>([]);
+  const [cloudBlokMasterRows, setCloudBlokMasterRows] = useState<Array<{ lokasiId: string; namaBlok: string }>>([]);
+  const [cloudLokasiIdByName, setCloudLokasiIdByName] = useState<Record<string, string>>({});
   const [surveyCalon, setSurveyCalon] = useState<SurveyCalonRow[]>([]);
   const [surveyForm, setSurveyForm] = useState<SurveyCalonForm>({ ...initialSurveyForm });
   const [surveyEditingId, setSurveyEditingId] = useState<string | null>(null);
@@ -239,6 +253,7 @@ export default function PenghuniPageClient({
   const [surveySubmitting, setSurveySubmitting] = useState(false);
   const [surveyInfo, setSurveyInfo] = useState("");
   const [surveyError, setSurveyError] = useState("");
+  const [viewerRole, setViewerRole] = useState("staff");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -255,6 +270,7 @@ export default function PenghuniPageClient({
     x: number;
     y: number;
   } | null>(null);
+  const canManageSurvey = viewerRole === "super_admin" || viewerRole === "manager";
 
   const kamarSandboxRows = useMemo(() => {
     if (!localDemoMode || !sandboxReady) return [] as KamarRow[];
@@ -270,36 +286,53 @@ export default function PenghuniPageClient({
     [data, surveyCalon]
   );
 
+  const getCloudUnitOptionsByLokasi = (lokasiName: string): string[] => {
+    const lokasiId = cloudLokasiIdByName[lokasiName] ?? "";
+    if (!lokasiId) return [];
+    return Array.from(
+      new Set(
+        cloudBlokMasterRows
+          .filter((row) => row.lokasiId === lokasiId)
+          .map((row) => row.namaBlok)
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "id"));
+  };
+
   const lokasiFormOptions = useMemo(() => {
-    if (!localDemoMode) return [...CLOUD_FALLBACK_LOKASI];
+    if (!localDemoMode) return cloudLokasiOptions;
     return buildDemoLokasiList(sandboxReady, kamarSandboxRows, rowsForDemoMerge);
-  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge]);
+  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge, cloudLokasiOptions]);
 
   const unitFormOptions = useMemo(() => {
-    if (!localDemoMode) return [...CLOUD_FALLBACK_UNIT];
+    if (!localDemoMode) return getCloudUnitOptionsByLokasi(form.lokasiKos);
     return buildDemoUnitList(sandboxReady, form.lokasiKos, kamarSandboxRows, rowsForDemoMerge);
-  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge, form.lokasiKos]);
+  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge, form.lokasiKos, cloudLokasiIdByName, cloudBlokMasterRows]);
 
   const surveyLokasiOptions = useMemo(() => {
-    if (!localDemoMode) return [...CLOUD_FALLBACK_LOKASI];
+    if (!localDemoMode) return cloudLokasiOptions;
     return buildDemoLokasiList(sandboxReady, kamarSandboxRows, rowsForDemoMerge);
-  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge]);
+  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge, cloudLokasiOptions]);
 
   const surveyUnitOptions = useMemo(() => {
-    if (!localDemoMode) return [...CLOUD_FALLBACK_UNIT];
+    if (!localDemoMode) return getCloudUnitOptionsByLokasi(surveyForm.lokasiKos);
     return buildDemoUnitList(sandboxReady, surveyForm.lokasiKos, kamarSandboxRows, rowsForDemoMerge);
-  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge, surveyForm.lokasiKos]);
+  }, [localDemoMode, sandboxReady, sandboxRev, kamarSandboxRows, rowsForDemoMerge, surveyForm.lokasiKos, cloudLokasiIdByName, cloudBlokMasterRows]);
 
   useEffect(() => {
     if (localDemoMode) return;
-    if (!CLOUD_FALLBACK_LOKASI.includes(form.lokasiKos)) {
-      setForm((prev) => ({
-        ...prev,
-        lokasiKos: CLOUD_FALLBACK_LOKASI[0],
-        unitBlok: CLOUD_FALLBACK_UNIT[0],
-      }));
+    if (!lokasiFormOptions.length) return;
+    if (!lokasiFormOptions.includes(form.lokasiKos)) {
+      const first = lokasiFormOptions[0] ?? "";
+      const units = getCloudUnitOptionsByLokasi(first);
+      setForm((prev) => ({ ...prev, lokasiKos: first, unitBlok: units[0] ?? "" }));
+      return;
     }
-  }, [localDemoMode, form.lokasiKos]);
+    const units = getCloudUnitOptionsByLokasi(form.lokasiKos);
+    if (units.length > 0 && !units.includes(form.unitBlok)) {
+      setForm((prev) => ({ ...prev, unitBlok: units[0] ?? "" }));
+    }
+  }, [localDemoMode, form.lokasiKos, form.unitBlok, lokasiFormOptions, cloudLokasiIdByName, cloudBlokMasterRows]);
 
   useEffect(() => {
     if (!localDemoMode || !sandboxReady) return;
@@ -731,12 +764,17 @@ export default function PenghuniPageClient({
         }
       }
     }
-    setData(rows.map((row) => mapDbRowToUi(row)));
+    const surveyRows = rows.filter((row) => String(row.status ?? "").toLowerCase() === "survey");
+    const penghuniRows = rows.filter((row) => String(row.status ?? "").toLowerCase() !== "survey");
+    setSurveyCalon(surveyRows.map((row) => mapDbRowToSurvey(row)));
+    setData(penghuniRows.map((row) => mapDbRowToUi(row)));
 
-    const { data: kamarData, error: kamarError } = await supabase
-      .from("kamar")
-      .select("*")
-      .order("no_kamar", { ascending: true });
+    const [{ data: kamarData, error: kamarError }, { data: lokasiData }, { data: blokData }] =
+      await Promise.all([
+        supabase.from("kamar").select("*").order("no_kamar", { ascending: true }),
+        supabase.from("master_lokasi").select("id, nama_lokasi"),
+        supabase.from("master_blok").select("lokasi_id, nama_blok"),
+      ]);
 
     if (kamarError) {
       setErrorMessage(kamarError.message);
@@ -744,12 +782,66 @@ export default function PenghuniPageClient({
       return false;
     }
     setCloudKamarRows((kamarData ?? []).map((row) => mapKamarDbToUi(row as Record<string, unknown>)));
+    const lokasiNames = (lokasiData ?? [])
+      .map((row) => String((row as Record<string, unknown>).nama_lokasi ?? "").trim())
+      .filter(Boolean);
+    const lokasiMap: Record<string, string> = {};
+    (lokasiData ?? []).forEach((row) => {
+      const rec = row as Record<string, unknown>;
+      const id = String(rec.id ?? "");
+      const nama = String(rec.nama_lokasi ?? "").trim();
+      if (id && nama) lokasiMap[nama] = id;
+    });
+    setCloudLokasiIdByName(lokasiMap);
+    setCloudLokasiOptions(Array.from(new Set(lokasiNames)).sort((a, b) => a.localeCompare(b, "id")));
+    setCloudBlokMasterRows(
+      (blokData ?? []).map((row) => {
+        const rec = row as Record<string, unknown>;
+        return {
+          lokasiId: String(rec.lokasi_id ?? ""),
+          namaBlok: String(rec.nama_blok ?? "").trim(),
+        };
+      })
+    );
     setIsLoading(false);
     return true;
   };
 
   const loadPenghuniRef = useRef(loadPenghuni);
   loadPenghuniRef.current = loadPenghuni;
+
+  useEffect(() => {
+    if (localDemoMode) return;
+    void loadPenghuniRef.current();
+  }, [localDemoMode]);
+
+  useEffect(() => {
+    if (localDemoMode) {
+      setViewerRole("staff");
+      return;
+    }
+    let cancelled = false;
+    const loadViewerRole = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      const { data } = await supabase
+        .from("user_profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const role = String((data as Record<string, unknown> | null)?.role ?? "staff")
+        .trim()
+        .toLowerCase();
+      setViewerRole(role || "staff");
+    };
+    void loadViewerRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [localDemoMode]);
 
   useEffect(() => {
     const fn = () => {
@@ -823,7 +915,7 @@ export default function PenghuniPageClient({
     const loc = lokasiFormOptions[0] ?? "";
     const units = localDemoMode
       ? buildDemoUnitList(sandboxReady, loc, kamarSandboxRows, rowsForDemoMerge)
-      : [...CLOUD_FALLBACK_UNIT];
+      : getCloudUnitOptionsByLokasi(loc);
     setForm({
       ...initialForm,
       lokasiKos: loc,
@@ -868,7 +960,7 @@ export default function PenghuniPageClient({
       setForm((prev) => {
         const units = localDemoMode
           ? buildDemoUnitList(sandboxReady, value, kamarSandboxRows, rowsForDemoMerge)
-          : [...CLOUD_FALLBACK_UNIT];
+          : getCloudUnitOptionsByLokasi(value);
         return {
           ...prev,
           lokasiKos: value,
@@ -958,10 +1050,7 @@ export default function PenghuniPageClient({
       writeSandboxJson(SB_KEY.penghuni, next);
       const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
       writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, next));
-      toast(
-        editingId ? "Data penghuni berhasil diperbarui (demo lokal)." : "Data penghuni berhasil disimpan (demo lokal).",
-        "success"
-      );
+      toast(editingId ? "Data penghuni berhasil diperbarui." : "Data penghuni berhasil disimpan.", "success");
       resetForm();
       setShowPenghuniForm(false);
       setIsSubmitting(false);
@@ -1013,7 +1102,7 @@ export default function PenghuniPageClient({
         const loc = row.lokasiKos || lokasiFormOptions[0] || "";
         const units = localDemoMode
           ? buildDemoUnitList(sandboxReady, loc, kamarSandboxRows, rowsForDemoMerge)
-          : [...CLOUD_FALLBACK_UNIT];
+          : getCloudUnitOptionsByLokasi(loc);
         return row.unitBlok && units.includes(row.unitBlok) ? row.unitBlok : units[0] ?? "";
       })(),
       noKamar: row.noKamar || availableRoomNumbers[0] || "",
@@ -1064,7 +1153,7 @@ export default function PenghuniPageClient({
     const loc = surveyLokasiOptions[0] ?? "";
     const units = localDemoMode
       ? buildDemoUnitList(sandboxReady, loc, kamarSandboxRows, rowsForDemoMerge)
-      : [...CLOUD_FALLBACK_UNIT];
+      : getCloudUnitOptionsByLokasi(loc);
     setSurveyForm({
       ...initialSurveyForm,
       lokasiKos: loc,
@@ -1094,7 +1183,7 @@ export default function PenghuniPageClient({
       setSurveyForm((prev) => {
         const units = localDemoMode
           ? buildDemoUnitList(sandboxReady, value, kamarSandboxRows, rowsForDemoMerge)
-          : [...CLOUD_FALLBACK_UNIT];
+          : getCloudUnitOptionsByLokasi(value);
         return {
           ...prev,
           lokasiKos: value,
@@ -1110,17 +1199,44 @@ export default function PenghuniPageClient({
     setSurveyForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSurveySubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSurveySubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!localDemoMode) {
-      const msg = "Data survey calon hanya disimpan saat demo lokal aktif.";
-      setSurveyError(msg);
-      toast(msg, "error");
-      return;
-    }
     setSurveySubmitting(true);
     setSurveyError("");
     setSurveyInfo("");
+
+    if (!localDemoMode) {
+      const payload = {
+        nama_lengkap: surveyForm.namaLengkap,
+        lokasi_kos: surveyForm.lokasiKos,
+        unit_blok: surveyForm.unitBlok,
+        no_kamar: "-",
+        periode_sewa_bulan: Math.max(1, Math.floor(Number(surveyForm.periodeSewa) || 1)),
+        tgl_check_in: surveyForm.rencanaCheckIn || null,
+        tgl_check_out: null,
+        harga_bulanan: parseRupiahToNumber(surveyForm.negosiasiHarga),
+        booking_fee: 0,
+        no_wa: surveyForm.noWa,
+        status: "Survey",
+        keterangan: surveyForm.keterangan,
+      };
+      const result = surveyEditingId
+        ? await supabase.from("penghuni").update(payload).eq("id", surveyEditingId)
+        : await supabase.from("penghuni").insert(payload);
+      if (result.error) {
+        setSurveyError(result.error.message);
+        toast(result.error.message, "error");
+        setSurveySubmitting(false);
+        return;
+      }
+      await loadPenghuni();
+      resetSurveyForm();
+      setShowSurveyForm(false);
+      toast(surveyEditingId ? "Data survey berhasil diperbarui." : "Data survey berhasil disimpan.", "success");
+      setSurveySubmitting(false);
+      return;
+    }
+
     const prevCreated = surveyEditingId
       ? surveyCalon.find((r) => r.id === surveyEditingId)?.createdAt
       : undefined;
@@ -1162,12 +1278,16 @@ export default function PenghuniPageClient({
     setSurveyInfo("Mode edit survey aktif.");
   };
 
-  const handleSurveyDelete = (id: string): boolean => {
+  const handleSurveyDelete = async (id: string): Promise<boolean> => {
     if (!localDemoMode) {
-      const msg = "Hapus survey tersedia saat demo lokal aktif.";
-      setSurveyError(msg);
-      toast(msg, "error");
-      return false;
+      const { error } = await supabase.from("penghuni").delete().eq("id", id).eq("status", "Survey");
+      if (error) {
+        setSurveyError(error.message);
+        toast(error.message, "error");
+        return false;
+      }
+      await loadPenghuni();
+      return true;
     }
     const next = surveyCalon.filter((r) => r.id !== id);
     setSurveyCalon(next);
@@ -1209,7 +1329,7 @@ export default function PenghuniPageClient({
       toast("Penghapusan dibatalkan.", "info");
       return;
     }
-    const deleted = handleSurveyDelete(row.id);
+    const deleted = await handleSurveyDelete(row.id);
     if (deleted) {
       toast("Data survey berhasil dihapus.", "success");
     }
@@ -1835,7 +1955,7 @@ export default function PenghuniPageClient({
               className="mt-2 text-xl text-[#2c2218] dark:text-[#f5e8d4]"
             />
             <p className="mt-1 text-xs text-[#7f6344] dark:text-[#b79a78]">
-              Urut berdasarkan rencana check-in. Form survey dibuka lewat popup (demo lokal).
+              Urut berdasarkan rencana check-in.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1868,13 +1988,7 @@ export default function PenghuniPageClient({
               </tr>
             </thead>
             <tbody>
-              {!localDemoMode ? (
-                <tr>
-                  <td className="px-3 py-4 text-[#856948]" colSpan={7}>
-                    Aktifkan demo lokal untuk daftar dan form survey.
-                  </td>
-                </tr>
-              ) : sortedSurveyRows.length === 0 ? (
+              {sortedSurveyRows.length === 0 ? (
                 <tr>
                   <td className="px-3 py-4 text-[#856948]" colSpan={7}>
                     Belum ada calon survey untuk filter ini.
@@ -1912,12 +2026,29 @@ export default function PenghuniPageClient({
                     <td className="px-2 py-2">{row.noWa || "—"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-1">
-                        <ActionButtonWithIcon
-                          icon={MessageCircle}
-                          onClick={() => handleSendSurveyWa(row)}
-                          label="Kirim WA"
-                          className="rounded-full bg-green-600 px-2 py-1 text-[10px] font-semibold text-white"
-                        />
+                        {canManageSurvey ? (
+                          <>
+                            <ActionButtonWithIcon
+                              icon={Pencil}
+                              onClick={() => handleSurveyEdit(row)}
+                              label="Edit"
+                              className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white"
+                            />
+                            <ActionButtonWithIcon
+                              icon={Trash2}
+                              onClick={() => void deleteSurveyWithConfirm(row)}
+                              label="Hapus"
+                              className="rounded-full bg-red-600 px-2 py-1 text-[10px] font-semibold text-white"
+                            />
+                          </>
+                        ) : (
+                          <ActionButtonWithIcon
+                            icon={MessageCircle}
+                            onClick={() => handleSendSurveyWa(row)}
+                            label="Kirim WA"
+                            className="rounded-full bg-green-600 px-2 py-1 text-[10px] font-semibold text-white"
+                          />
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -2678,7 +2809,7 @@ export default function PenghuniPageClient({
                 {surveyEditingId ? "Edit survey" : "Survey baru"}
               </p>
               <h2 className="mt-1 text-lg font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
-                {localDemoMode ? "Calon penghuni (demo lokal)" : "Survey memerlukan demo lokal"}
+                {localDemoMode ? "Calon penghuni" : "Survey calon penghuni"}
               </h2>
             </div>
             <button
@@ -2691,8 +2822,7 @@ export default function PenghuniPageClient({
             </button>
           </div>
 
-          {localDemoMode ? (
-            <form className="space-y-4" onSubmit={handleSurveySubmit}>
+          <form className="space-y-4" onSubmit={handleSurveySubmit}>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="md:col-span-2">
                   <label className="mb-1 block text-xs font-medium uppercase tracking-[0.18em] text-[#8b6d48]">Nama lengkap</label>
@@ -2800,11 +2930,6 @@ export default function PenghuniPageClient({
                 />
               </div>
             </form>
-          ) : (
-            <p className="text-sm text-[#856948] dark:text-[#b79a78]">
-              Aktifkan demo lokal di header untuk menyimpan data survey di browser Anda.
-            </p>
-          )}
         </div>
       </div>
     ) : null}
