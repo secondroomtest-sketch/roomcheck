@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/libsupabaseClient";
 import { iconTone } from "@/lib/ui-accent";
-import { BarChart3, BedDouble, Building2, ClipboardList, HandCoins, House } from "lucide-react";
+import { BarChart3, BedDouble, Building2, ClipboardList, HandCoins, House, Menu, X } from "lucide-react";
 import { SandboxModeProvider, useSandboxMode } from "@/components/sandbox-mode-provider";
 import { AppFeedbackProvider } from "@/components/app-feedback-provider";
 import { readDemoProfileSession, writeDemoProfileSession } from "@/lib/demo-auth";
@@ -52,6 +52,7 @@ function DashboardShellInner({
   /** null until mount — avoids SSR/client hydration mismatch on clock text */
   const [now, setNow] = useState<Date | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profileName, setProfileName] = useState("User");
   const [profileRole, setProfileRole] = useState("staff");
   const navItemsScoped = useMemo(() => {
@@ -198,6 +199,61 @@ function DashboardShellInner({
             })}
           </nav>
         </aside>
+        {mobileNavOpen ? (
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/45"
+              aria-label="Tutup menu"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <aside
+              className={`relative z-10 h-full w-[18rem] border-r p-5 ${
+                isDark ? "border-[#2d315a] bg-[#171a33]" : "border-[#d8defc] bg-[#f8f9ff]"
+              }`}
+            >
+              <div className="mb-6 flex items-center justify-between">
+                <p className={`text-sm font-semibold ${isDark ? "text-[#dbe3ff]" : "text-[#3f4f9d]"}`}>Menu</p>
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen(false)}
+                  className={`rounded-full p-1.5 ${isDark ? "text-[#cbd6ff] hover:bg-[#23294f]" : "text-[#3f4f9d] hover:bg-[#e9eeff]"}`}
+                  aria-label="Tutup menu navigasi"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <nav className="space-y-2">
+                {navItemsScoped.map((item) => {
+                  const active = pathname === item.href;
+                  const Icon = item.icon;
+                  const iconClass = active
+                    ? "text-[#eef3ff]"
+                    : isDark
+                    ? "text-[#cbd6ff]"
+                    : iconTone.brand;
+                  return (
+                    <Link
+                      key={`mobile-${item.label}`}
+                      href={item.href}
+                      onClick={() => setMobileNavOpen(false)}
+                      className={`flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                        active
+                          ? "bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] text-[#eef3ff]"
+                          : isDark
+                          ? "text-[#cbd6ff] hover:bg-[#23294f]"
+                          : "text-[#3f4f9d] hover:bg-[#e9eeff]"
+                      }`}
+                    >
+                      <Icon size={16} className={iconClass} />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </aside>
+          </div>
+        ) : null}
 
         <div className="flex min-h-screen flex-1 flex-col">
           <header
@@ -208,6 +264,18 @@ function DashboardShellInner({
             }`}
           >
             <div>
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className={`mb-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] lg:hidden ${
+                  isDark
+                    ? "border-[#3e477c] bg-[#1f2546] text-[#b8c6ff]"
+                    : "border-[#d3dbff] bg-[#f8f9ff] text-[#4a5ba4]"
+                }`}
+              >
+                <Menu size={12} />
+                Menu
+              </button>
               <p
                 className={`text-sm font-medium ${
                   isDark ? "text-[#d6ddff]" : "text-[#5161a8]"

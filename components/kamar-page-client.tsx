@@ -62,14 +62,11 @@ function buildLokasiSelectOptions(
   localDemo: boolean,
   kamarRows: KamarRow[],
   penghuniRows: PenghuniSandboxLite[],
-  sandboxReady: boolean
+  sandboxReady: boolean,
+  cloudLokasi: string[]
 ): string[] {
   if (!localDemo) {
-    const kamarLokasi = kamarRows.map((r) => r.lokasiKos).filter(Boolean);
-    const penghuniLokasi = penghuniRows.map((p) => p.lokasiKos).filter(Boolean);
-    return Array.from(new Set([...kamarLokasi, ...penghuniLokasi])).sort((a, b) =>
-      a.localeCompare(b, "id")
-    );
+    return Array.from(new Set(cloudLokasi.filter(Boolean))).sort((a, b) => a.localeCompare(b, "id"));
   }
   return buildDemoLokasiList(sandboxReady, kamarRows, penghuniRows);
 }
@@ -79,20 +76,11 @@ function buildUnitSelectOptions(
   lokasiName: string,
   kamarRows: KamarRow[],
   penghuniRows: PenghuniSandboxLite[],
-  sandboxReady: boolean
+  sandboxReady: boolean,
+  cloudUnitByLokasi: string[]
 ): string[] {
   if (!localDemo) {
-    const fromKamar = kamarRows
-      .filter((r) => !lokasiName || r.lokasiKos === lokasiName)
-      .map((r) => r.unitBlok)
-      .filter(Boolean);
-    const fromPenghuni = penghuniRows
-      .filter((p) => !lokasiName || p.lokasiKos === lokasiName)
-      .map((p) => p.unitBlok)
-      .filter(Boolean);
-    return Array.from(new Set([...fromKamar, ...fromPenghuni])).sort((a, b) =>
-      a.localeCompare(b, "id")
-    );
+    return Array.from(new Set(cloudUnitByLokasi.filter(Boolean))).sort((a, b) => a.localeCompare(b, "id"));
   }
   return buildDemoUnitList(sandboxReady, lokasiName, kamarRows, penghuniRows);
 }
@@ -145,6 +133,9 @@ export default function KamarPageClient({
   }, []);
 
   const [penghuniCloudRows, setPenghuniCloudRows] = useState<PenghuniForKamarSync[]>(initialPenghuniForSync);
+  const [masterLokasiCloud, setMasterLokasiCloud] = useState<string[]>([]);
+  const [masterBlokCloud, setMasterBlokCloud] = useState<Array<{ lokasiId: string; namaBlok: string }>>([]);
+  const [masterLokasiMapCloud, setMasterLokasiMapCloud] = useState<Record<string, string>>({});
   const [data, setData] = useState<KamarRow[]>(initialData);
 
   const penghuniForKamarSyncList = useMemo((): PenghuniForKamarSync[] => {
@@ -204,15 +195,58 @@ export default function KamarPageClient({
     setPenghuniCloudRows(initialPenghuniForSync);
   }, [localDemoMode, initialPenghuniForSync]);
 
+  const cloudUnitBySelectedLokasi = useMemo(() => {
+    const getCloudUnits = (lokasiName: string) => {
+      if (!lokasiName.trim()) return [] as string[];
+      const matchedLokasiId = Object.entries(masterLokasiMapCloud).find(
+        ([, namaLokasi]) => namaLokasi === lokasiName
+      )?.[0];
+      if (!matchedLokasiId) return [] as string[];
+      return masterBlokCloud
+        .filter((b) => b.lokasiId === matchedLokasiId)
+        .map((b) => b.namaBlok)
+        .filter(Boolean);
+    };
+    return getCloudUnits(form.lokasiKos);
+  }, [form.lokasiKos, masterLokasiMapCloud, masterBlokCloud]);
+
+  const getCloudUnitOptionsByLokasi = (lokasiName: string) => {
+    if (!lokasiName.trim()) return [];
+    const matchedLokasiId = Object.entries(masterLokasiMapCloud).find(
+      ([, namaLokasi]) => namaLokasi === lokasiName
+    )?.[0];
+    if (!matchedLokasiId) return [];
+    return masterBlokCloud
+      .filter((b) => b.lokasiId === matchedLokasiId)
+      .map((b) => b.namaBlok)
+      .filter(Boolean);
+  };
+
   const lokasiSelectOptions = useMemo(
-    () => buildLokasiSelectOptions(!!localDemoMode, data, penghuniSandboxRows, sandboxReady),
-    [localDemoMode, data, penghuniSandboxRows, sandboxReady, masterTick, sandboxRev]
+    () => buildLokasiSelectOptions(!!localDemoMode, data, penghuniSandboxRows, sandboxReady, masterLokasiCloud),
+    [localDemoMode, data, penghuniSandboxRows, sandboxReady, masterTick, sandboxRev, masterLokasiCloud]
   );
 
   const unitSelectOptions = useMemo(
     () =>
-      buildUnitSelectOptions(!!localDemoMode, form.lokasiKos, data, penghuniSandboxRows, sandboxReady),
-    [localDemoMode, form.lokasiKos, data, penghuniSandboxRows, sandboxReady, masterTick, sandboxRev]
+      buildUnitSelectOptions(
+        !!localDemoMode,
+        form.lokasiKos,
+        data,
+        penghuniSandboxRows,
+        sandboxReady,
+        cloudUnitBySelectedLokasi
+      ),
+    [
+      localDemoMode,
+      form.lokasiKos,
+      data,
+      penghuniSandboxRows,
+      sandboxReady,
+      masterTick,
+      sandboxRev,
+      cloudUnitBySelectedLokasi,
+    ]
   );
 
   const lokasiFilterOptions = useMemo(() => {
@@ -295,28 +329,66 @@ export default function KamarPageClient({
   }, [localDemoMode, initialData, sandboxRev]);
 
   useEffect(() => {
-    if (!localDemoMode) return;
-    const opts = buildLokasiSelectOptions(true, data, penghuniSandboxRows, sandboxReady);
+    const opts = buildLokasiSelectOptions(
+      !!localDemoMode,
+      data,
+      penghuniSandboxRows,
+      sandboxReady,
+      masterLokasiCloud
+    );
     if (opts.length === 0) return;
     if (!opts.includes(form.lokasiKos)) {
       const first = opts[0] ?? "";
-      const units = buildUnitSelectOptions(true, first, data, penghuniSandboxRows, sandboxReady);
+      const units = buildUnitSelectOptions(
+        !!localDemoMode,
+        first,
+        data,
+        penghuniSandboxRows,
+        sandboxReady,
+        getCloudUnitOptionsByLokasi(first)
+      );
       setForm((prev) => ({
         ...prev,
         lokasiKos: first,
         unitBlok: units.includes(prev.unitBlok) ? prev.unitBlok : units[0] ?? "",
       }));
     }
-  }, [localDemoMode, data, penghuniSandboxRows, sandboxReady, masterTick, sandboxRev, form.lokasiKos]);
+  }, [
+    localDemoMode,
+    data,
+    penghuniSandboxRows,
+    sandboxReady,
+    masterTick,
+    sandboxRev,
+    form.lokasiKos,
+    masterLokasiCloud,
+    cloudUnitBySelectedLokasi,
+  ]);
 
   useEffect(() => {
-    if (!localDemoMode) return;
-    const units = buildUnitSelectOptions(true, form.lokasiKos, data, penghuniSandboxRows, sandboxReady);
+    const units = buildUnitSelectOptions(
+      !!localDemoMode,
+      form.lokasiKos,
+      data,
+      penghuniSandboxRows,
+      sandboxReady,
+      cloudUnitBySelectedLokasi
+    );
     if (units.length === 0) return;
     if (!units.includes(form.unitBlok)) {
       setForm((prev) => ({ ...prev, unitBlok: units[0] ?? "" }));
     }
-  }, [localDemoMode, form.lokasiKos, data, penghuniSandboxRows, sandboxReady, masterTick, sandboxRev]);
+  }, [
+    localDemoMode,
+    form.lokasiKos,
+    data,
+    penghuniSandboxRows,
+    sandboxReady,
+    masterTick,
+    sandboxRev,
+    form.unitBlok,
+    cloudUnitBySelectedLokasi,
+  ]);
 
   const mapDbRowToUi = (row: Record<string, unknown>): KamarRow => {
     const statusRaw = String(row.status ?? "Available");
@@ -343,11 +415,18 @@ export default function KamarPageClient({
       setIsLoading(false);
       return true;
     }
-    const [{ data: fetchedData, error }, { data: penData, error: penErr }] = await Promise.all([
+    const [
+      { data: fetchedData, error },
+      { data: penData, error: penErr },
+      { data: lokasiMasterData, error: lokasiMasterErr },
+      { data: blokMasterData, error: blokMasterErr },
+    ] = await Promise.all([
       supabase.from("kamar").select("*").order("no_kamar", { ascending: true }),
       supabase
         .from("penghuni")
         .select("status, lokasi_kos, unit_blok, no_kamar, sewa_kamar_paid, nama_lengkap, tgl_check_out"),
+      supabase.from("master_lokasi").select("id, nama_lokasi").order("created_at", { ascending: false }),
+      supabase.from("master_blok").select("lokasi_id, nama_blok").order("created_at", { ascending: false }),
     ]);
 
     if (error) {
@@ -360,6 +439,26 @@ export default function KamarPageClient({
       setPenghuniCloudRows(
         penData.map((row) => mapSupabasePenghuniToSync(row as Record<string, unknown>))
       );
+    }
+    if (!lokasiMasterErr && lokasiMasterData) {
+      const map: Record<string, string> = {};
+      const lokasiList = (lokasiMasterData as Array<Record<string, unknown>>)
+        .map((row) => {
+          const id = String(row.id ?? "");
+          const nama = String(row.nama_lokasi ?? "").trim();
+          if (id && nama) map[id] = nama;
+          return nama;
+        })
+        .filter(Boolean);
+      setMasterLokasiMapCloud(map);
+      setMasterLokasiCloud(Array.from(new Set(lokasiList)).sort((a, b) => a.localeCompare(b, "id")));
+    }
+    if (!blokMasterErr && blokMasterData) {
+      const blokList = (blokMasterData as Array<Record<string, unknown>>).map((row) => ({
+        lokasiId: String(row.lokasi_id ?? ""),
+        namaBlok: String(row.nama_blok ?? "").trim(),
+      }));
+      setMasterBlokCloud(blokList);
     }
 
     setErrorMessage("");
@@ -402,8 +501,17 @@ export default function KamarPageClient({
 
   const resetForm = () => {
     if (localDemoMode) {
-      const loc = buildLokasiSelectOptions(true, data, penghuniSandboxRows, sandboxReady)[0] ?? "";
-      const unit = buildUnitSelectOptions(true, loc, data, penghuniSandboxRows, sandboxReady)[0] ?? "";
+      const loc =
+        buildLokasiSelectOptions(true, data, penghuniSandboxRows, sandboxReady, masterLokasiCloud)[0] ?? "";
+      const unit =
+        buildUnitSelectOptions(
+          true,
+          loc,
+          data,
+          penghuniSandboxRows,
+          sandboxReady,
+          getCloudUnitOptionsByLokasi(loc)
+        )[0] ?? "";
       setForm({
         lokasiKos: loc,
         unitBlok: unit,
@@ -412,8 +520,17 @@ export default function KamarPageClient({
         keterangan: "",
       });
     } else {
-      const loc = buildLokasiSelectOptions(false, data, penghuniSandboxRows, sandboxReady)[0] ?? "";
-      const unit = buildUnitSelectOptions(false, loc, data, penghuniSandboxRows, sandboxReady)[0] ?? "";
+      const loc =
+        buildLokasiSelectOptions(false, data, penghuniSandboxRows, sandboxReady, masterLokasiCloud)[0] ?? "";
+      const unit =
+        buildUnitSelectOptions(
+          false,
+          loc,
+          data,
+          penghuniSandboxRows,
+          sandboxReady,
+          getCloudUnitOptionsByLokasi(loc)
+        )[0] ?? "";
       setForm({
         lokasiKos: loc,
         unitBlok: unit,
@@ -511,14 +628,21 @@ export default function KamarPageClient({
 
   const handleEdit = (row: KamarRow) => {
     setEditingId(row.id);
-    const locOpts = buildLokasiSelectOptions(!!localDemoMode, data, penghuniSandboxRows, sandboxReady);
+    const locOpts = buildLokasiSelectOptions(
+      !!localDemoMode,
+      data,
+      penghuniSandboxRows,
+      sandboxReady,
+      masterLokasiCloud
+    );
     const locFirst = locOpts[0] ?? "";
     const unitOpts = buildUnitSelectOptions(
       !!localDemoMode,
       row.lokasiKos || locFirst,
       data,
       penghuniSandboxRows,
-      sandboxReady
+      sandboxReady,
+      getCloudUnitOptionsByLokasi(row.lokasiKos || locFirst)
     );
     setForm({
       lokasiKos: row.lokasiKos || locFirst,
@@ -907,7 +1031,8 @@ export default function KamarPageClient({
                           nextLok,
                           data,
                           penghuniSandboxRows,
-                          sandboxReady
+                          sandboxReady,
+                          getCloudUnitOptionsByLokasi(nextLok)
                         );
                         setForm((prev) => ({
                           ...prev,
