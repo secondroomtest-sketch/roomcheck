@@ -13,13 +13,13 @@ type SandboxModeContextValue = {
 const SandboxModeContext = createContext<SandboxModeContextValue | null>(null);
 
 export function SandboxModeProvider({ children }: { children: React.ReactNode }) {
-  const [localDemoMode, setLocalDemoModeState] = useState(true);
+  const [localDemoMode, setLocalDemoModeState] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    const next = stored === null ? true : stored === "true";
-    setLocalDemoModeState(next);
+    // Cloud-first mode: force sandbox off by default.
+    setLocalDemoModeState(false);
+    window.localStorage.setItem(STORAGE_KEY, "false");
   }, []);
 
   const setLocalDemoMode = useCallback((value: boolean) => {

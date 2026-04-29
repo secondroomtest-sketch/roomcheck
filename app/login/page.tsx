@@ -16,12 +16,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [demoModeActive, setDemoModeActive] = useState(true);
+  const [demoModeActive, setDemoModeActive] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const refreshMode = () => {
-      setDemoModeActive((window.localStorage.getItem(DEMO_MODE_STORAGE_KEY) ?? "true") === "true");
+      // Cloud-first mode: keep demo off.
+      window.localStorage.setItem(DEMO_MODE_STORAGE_KEY, "false");
+      setDemoModeActive(false);
     };
     refreshMode();
     window.addEventListener("storage", refreshMode);
@@ -35,8 +37,8 @@ export default function LoginPage() {
 
     const demoMode =
       typeof window !== "undefined"
-        ? (window.localStorage.getItem(DEMO_MODE_STORAGE_KEY) ?? "true") === "true"
-        : true;
+        ? (window.localStorage.getItem(DEMO_MODE_STORAGE_KEY) ?? "false") === "true"
+        : false;
     if (demoMode) {
       const blob = readSandboxJson<{ usersData?: Array<Record<string, unknown>> } | null>(
         SB_KEY.master,

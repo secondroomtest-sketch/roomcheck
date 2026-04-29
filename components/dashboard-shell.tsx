@@ -6,15 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/libsupabaseClient";
 import { iconTone } from "@/lib/ui-accent";
-import {
-  BarChart3,
-  BedDouble,
-  Building2,
-  ClipboardList,
-  FlaskConical,
-  HandCoins,
-  House,
-} from "lucide-react";
+import { BarChart3, BedDouble, Building2, ClipboardList, HandCoins, House } from "lucide-react";
 import { SandboxModeProvider, useSandboxMode } from "@/components/sandbox-mode-provider";
 import { AppFeedbackProvider } from "@/components/app-feedback-provider";
 import { readDemoProfileSession, writeDemoProfileSession } from "@/lib/demo-auth";
@@ -44,7 +36,7 @@ function DashboardShellInner({
 }: {
   children: React.ReactNode;
 }) {
-  const { localDemoMode, setLocalDemoMode } = useSandboxMode();
+  const { localDemoMode } = useSandboxMode();
   const router = useRouter();
   const pathname = usePathname();
   const [theme] = useState<ThemeMode>(() => {
@@ -229,22 +221,15 @@ function DashboardShellInner({
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-              <button
-                type="button"
-                onClick={() => setLocalDemoMode(!localDemoMode)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition sm:text-[11px] ${
-                  localDemoMode
-                    ? isDark
-                      ? "border-violet-400/55 bg-violet-950/35 text-violet-200"
-                      : "border-violet-300 bg-violet-50 text-violet-900"
-                    : isDark
-                      ? "border-[#3e477c] bg-[#1f2546] text-[#b8c6ff]"
-                      : "border-[#d3dbff] bg-[#f8f9ff] text-[#4a5ba4]"
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:text-[11px] ${
+                  isDark
+                    ? "border-[#3e477c] bg-[#1f2546] text-[#b8c6ff]"
+                    : "border-[#d3dbff] bg-[#f8f9ff] text-[#4a5ba4]"
                 }`}
               >
-                <FlaskConical size={14} className="shrink-0 opacity-90" />
-                Demo lokal: {localDemoMode ? "Aktif" : "Mati"}
-              </button>
+                Cloud Mode: Supabase
+              </span>
               <p className="bg-gradient-to-r from-[#4d6dff] via-[#6d32ff] to-[#15c57a] bg-clip-text text-[10px] font-extrabold uppercase tracking-[0.22em] text-transparent sm:text-[11px]">
                 SECOND ROOM KOST MANAGEMENT
               </p>
@@ -303,19 +288,6 @@ function DashboardShellInner({
               </div>
             </div>
           </header>
-
-          {localDemoMode ? (
-            <div
-              className={`mx-5 mt-2 rounded-2xl border px-4 py-2.5 text-xs leading-relaxed sm:mx-8 ${
-                isDark
-                  ? "border-violet-500/35 bg-violet-950/25 text-violet-100/95"
-                  : "border-violet-200 bg-violet-50/90 text-violet-950"
-              }`}
-            >
-              Mode demo lokal aktif: isian formulir tersimpan di peramban Anda dan tidak dikirim ke Supabase. Matikan
-              &quot;Demo lokal&quot; di header untuk memakai database cloud.
-            </div>
-          ) : null}
 
           <main className="flex-1 px-5 py-6 sm:px-8">{children}</main>
           <footer className="px-5 pb-4 sm:px-8">
