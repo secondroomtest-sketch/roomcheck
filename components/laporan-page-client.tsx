@@ -84,6 +84,8 @@ export default function LaporanPageClient({
   const [sandboxRev, setSandboxRev] = useState(0);
   /** Samakan SSR & hydration: jangan baca localStorage sandbox sebelum mount (lihat dashboard). */
   const [sandboxReady, setSandboxReady] = useState(false);
+  /** Hindari render Recharts saat prerender server (mencegah width/height -1). */
+  const chartReady = sandboxReady;
 
   useEffect(() => {
     setSandboxReady(true);
@@ -407,31 +409,35 @@ export default function LaporanPageClient({
             Pemasukan vs Pengeluaran per Bulan
           </h2>
           <div className="h-80 w-full">
-            <ResponsiveContainer>
-              <LineChart data={monthlyChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="pemasukan" stroke="#16a34a" strokeWidth={2} />
-                <Line type="monotone" dataKey="pengeluaran" stroke="#dc2626" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+            {chartReady ? (
+              <ResponsiveContainer>
+                <LineChart data={monthlyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="pemasukan" stroke="#16a34a" strokeWidth={2} />
+                  <Line type="monotone" dataKey="pengeluaran" stroke="#dc2626" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : null}
           </div>
 
           <div className="mt-5 h-72 w-full">
-            <ResponsiveContainer>
-              <BarChart data={monthlyChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="pemasukan" fill="#16a34a" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="pengeluaran" fill="#dc2626" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {chartReady ? (
+              <ResponsiveContainer>
+                <BarChart data={monthlyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="pemasukan" fill="#16a34a" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="pengeluaran" fill="#dc2626" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : null}
           </div>
         </section>
 
@@ -441,24 +447,26 @@ export default function LaporanPageClient({
             Pie Chart Status Kamar
           </h2>
           <div className="h-80 w-full">
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie
-                  data={statusPieData}
-                  dataKey="value"
-                  nameKey="name"
-                  outerRadius={110}
-                  innerRadius={45}
-                  label
-                >
-                  {statusPieData.map((entry, index) => (
-                    <Cell key={`${entry.name}-${index}`} fill={pieColors[index % pieColors.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+            {chartReady ? (
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={statusPieData}
+                    dataKey="value"
+                    nameKey="name"
+                    outerRadius={110}
+                    innerRadius={45}
+                    label
+                  >
+                    {statusPieData.map((entry, index) => (
+                      <Cell key={`${entry.name}-${index}`} fill={pieColors[index % pieColors.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : null}
           </div>
         </section>
       </div>
