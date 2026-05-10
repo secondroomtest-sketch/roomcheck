@@ -8,16 +8,24 @@
 -- =========================================================
 -- 1) Helper functions
 -- =========================================================
+-- SECURITY DEFINER: baca satu baris milik pemanggil tanpa rekursif RLS; role dinormalisasi agar tidak gagal dibanding literal.
 create or replace function public.current_user_role()
 returns text
 language sql
 stable
+security definer
+set search_path = public
+set row_security = off
 as $$
-  select up.role
+  select lower(trim(both from coalesce(up.role, '')))
   from public.user_profiles up
   where up.id = auth.uid()
   limit 1
 $$;
+
+revoke all on function public.current_user_role() from public;
+grant execute on function public.current_user_role() to authenticated;
+grant execute on function public.current_user_role() to service_role;
 
 create or replace function public.is_super_admin()
 returns boolean
@@ -43,24 +51,50 @@ as $$
   select coalesce(public.current_user_role() = 'staff', false)
 $$;
 
--- Check whether current user has scope access by lokasi_kos + unit_blok text labels
-create or replace function public.has_scope_access(p_lokasi text, p_blok text)
+-- Sama dengan filter penuh di dashboard (super_admin, manager, supervisor)
+create or replace function public.has_global_operational_access()
 returns boolean
 language sql
 stable
 as $$
+  select coalesce(public.current_user_role() in ('super_admin', 'manager', 'supervisor'), false)
+$$;
+
+create or replace function public.can_audit_password_changes()
+returns boolean
+language sql
+stable
+as $$
+  select coalesce(public.current_user_role() in ('super_admin', 'manager'), false)
+$$;
+
+-- Check whether current user has scope access by lokasi_kos + unit_blok text labels
+-- (blok harus anak dari lokasi di master, dan keduanya masuk array akses — lihat fix_has_scope_access_join.sql)
+create or replace function public.has_scope_access(p_lokasi text, p_blok text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+set row_security = off
+as $$
   select exists (
     select 1
     from public.user_profiles up
-    join public.master_lokasi ml
-      on ml.id = any(up.akses_lokasi)
     join public.master_blok mb
-      on mb.id = any(up.akses_blok)
+      on mb.id = any(coalesce(up.akses_blok, '{}'::uuid[]))
+    join public.master_lokasi ml
+      on ml.id = mb.lokasi_id
+      and ml.id = any(coalesce(up.akses_lokasi, '{}'::uuid[]))
     where up.id = auth.uid()
       and lower(trim(ml.nama_lokasi)) = lower(trim(coalesce(p_lokasi, '')))
       and lower(trim(mb.nama_blok)) = lower(trim(coalesce(p_blok, '')))
   )
 $$;
+
+revoke all on function public.has_scope_access(text, text) from public;
+grant execute on function public.has_scope_access(text, text) to authenticated;
+grant execute on function public.has_scope_access(text, text) to service_role;
 
 -- =========================================================
 -- 2) Base grants (least privilege)
@@ -81,6 +115,8 @@ to authenticated;
 
 grant select, insert, update on table public.user_profiles to authenticated;
 
+grant select, insert on table public.password_change_log to authenticated;
+
 -- Optional: remove anon access for production app
 revoke all on table
   public.finance_kategori,
@@ -89,7 +125,8 @@ revoke all on table
   public.user_profiles,
   public.kamar,
   public.penghuni,
-  public.finance
+  public.finance,
+  public.password_change_log
 from anon;
 
 -- =========================================================
@@ -102,6 +139,7 @@ alter table public.user_profiles enable row level security;
 alter table public.kamar enable row level security;
 alter table public.penghuni enable row level security;
 alter table public.finance enable row level security;
+alter table public.password_change_log enable row level security;
 
 alter table public.finance_kategori force row level security;
 alter table public.master_lokasi force row level security;
@@ -110,6 +148,7 @@ alter table public.user_profiles force row level security;
 alter table public.kamar force row level security;
 alter table public.penghuni force row level security;
 alter table public.finance force row level security;
+alter table public.password_change_log force row level security;
 
 -- =========================================================
 -- 4) Drop previous policies (idempotent rerun safe)
@@ -141,6 +180,9 @@ drop policy if exists finance_select on public.finance;
 drop policy if exists finance_insert on public.finance;
 drop policy if exists finance_update on public.finance;
 drop policy if exists finance_delete on public.finance;
+
+drop policy if exists password_change_log_select on public.password_change_log;
+drop policy if exists password_change_log_insert_self on public.password_change_log;
 
 -- =========================================================
 -- 5) Master table policies
@@ -223,7 +265,7 @@ on public.kamar
 for select
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -232,7 +274,7 @@ on public.kamar
 for insert
 to authenticated
 with check (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -241,11 +283,11 @@ on public.kamar
 for update
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 )
 with check (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -254,7 +296,7 @@ on public.kamar
 for delete
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.is_owner() and public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -264,7 +306,7 @@ on public.penghuni
 for select
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -273,7 +315,7 @@ on public.penghuni
 for insert
 to authenticated
 with check (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -282,11 +324,11 @@ on public.penghuni
 for update
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 )
 with check (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -295,7 +337,7 @@ on public.penghuni
 for delete
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.is_owner() and public.has_scope_access(lokasi_kos, unit_blok)
 );
 
@@ -305,7 +347,7 @@ on public.finance
 for select
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
   or (lokasi_kos is null and unit_blok is null and public.is_owner())
 );
@@ -315,7 +357,7 @@ on public.finance
 for insert
 to authenticated
 with check (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
   or (lokasi_kos is null and unit_blok is null and public.is_owner())
 );
@@ -325,12 +367,12 @@ on public.finance
 for update
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
   or (lokasi_kos is null and unit_blok is null and public.is_owner())
 )
 with check (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
   or (lokasi_kos is null and unit_blok is null and public.is_owner())
 );
@@ -340,12 +382,25 @@ on public.finance
 for delete
 to authenticated
 using (
-  public.is_super_admin()
+  public.has_global_operational_access()
   or public.is_owner() and (
     public.has_scope_access(lokasi_kos, unit_blok)
     or (lokasi_kos is null and unit_blok is null)
   )
 );
+
+-- -------- password_change_log --------
+create policy password_change_log_select
+on public.password_change_log
+for select
+to authenticated
+using (public.can_audit_password_changes());
+
+create policy password_change_log_insert_self
+on public.password_change_log
+for insert
+to authenticated
+with check (subject_user_id = auth.uid());
 
 -- =========================================================
 -- 8) Optional bootstrap helper (one-time)

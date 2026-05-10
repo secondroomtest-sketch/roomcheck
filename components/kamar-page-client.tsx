@@ -20,8 +20,11 @@ import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
+import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
+import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY, newSandboxId } from "@/lib/sandbox-storage";
+import { pageHeroSectionClass } from "@/lib/ui-page-layout";
 import { buildDemoLokasiList, buildDemoUnitList } from "@/lib/demo-form-options";
 import {
   findPenghuniForKamarRoom,
@@ -140,6 +143,8 @@ export default function KamarPageClient({
   initialData: KamarRow[];
   initialPenghuniForSync?: PenghuniForKamarSync[];
 }) {
+  const sessionHydrated = useSupabaseSessionHydrated();
+  const cloudSyncTick = useCloudDataResyncTick();
   const { localDemoMode } = useSandboxMode();
   const { toast, confirm } = useAppFeedback();
   const [masterTick, setMasterTick] = useState(0);
@@ -207,11 +212,6 @@ export default function KamarPageClient({
       window.removeEventListener("secondroom-sandbox-updated", fnSandbox as EventListener);
     };
   }, []);
-
-  useEffect(() => {
-    if (localDemoMode) return;
-    setPenghuniCloudRows(initialPenghuniForSync);
-  }, [localDemoMode, initialPenghuniForSync]);
 
   const cloudUnitBySelectedLokasi = useMemo(() => {
     const getCloudUnits = (lokasiName: string) => {
@@ -337,10 +337,7 @@ export default function KamarPageClient({
   }, [lokasiFilterOptions, ringkasanLokasiFilter]);
 
   useEffect(() => {
-    if (!localDemoMode) {
-      setData(initialData);
-      return;
-    }
+    if (!localDemoMode) return;
     const saved = readSandboxJson<KamarRow[] | null>(SB_KEY.kamar, null);
     if (saved) setData(saved);
     else setData(initialData);
@@ -518,10 +515,10 @@ export default function KamarPageClient({
   };
 
   useEffect(() => {
-    if (localDemoMode) return;
+    if (localDemoMode || !sessionHydrated) return;
     void loadKamar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localDemoMode, masterTick]);
+  }, [localDemoMode, masterTick, sessionHydrated, cloudSyncTick]);
 
   const resetForm = () => {
     if (localDemoMode) {
@@ -732,7 +729,7 @@ export default function KamarPageClient({
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 pb-10">
-      <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-6 shadow-[0_20px_50px_-35px_rgba(63,79,157,0.35)] dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+      <article className={pageHeroSectionClass}>
         <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="flex items-center gap-2 text-xs uppercase tracking-[0.26em] text-[#9d7e55] dark:text-[#cfb089]">

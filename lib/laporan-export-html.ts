@@ -1,5 +1,11 @@
 import type { LaporanExportPayloadV1 } from "@/lib/laporan-export-types";
 import { LAPORAN_CARD_SURFACE_STYLES_HTML } from "@/lib/laporan-dashboard-card-styles";
+import {
+  filterDashboardCardsByLaporanFokus,
+  filterPemasukanRowsForLaporanCetak,
+  filterPengeluaranRowsForLaporanCetak,
+} from "@/lib/laporan-cetak-filters";
+import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 
 function esc(s: string): string {
   return String(s ?? "")
@@ -61,22 +67,42 @@ export function buildLaporanStandaloneHtml(
 
   const { filters, summary, monthly, kamarByStatus, financeRows, penghuniRows, surveyRows, dashboardCards } =
     payload;
-  const cards = dashboardCards?.length ? dashboardCards : [];
+  const fokus = payload.laporanFokus;
+  const cardsRaw = dashboardCards?.length ? dashboardCards : [];
+  const cards = filterDashboardCardsByLaporanFokus(cardsRaw, fokus ?? undefined);
   const maxFinance = 200;
-  const pemSource = financeRows.filter((f) => f.kategori === "Pemasukan");
-  const pengSource = financeRows.filter((f) => f.kategori === "Pengeluaran");
+  const pemSource = filterPemasukanRowsForLaporanCetak(financeRows, fokus ?? undefined);
+  const pengSource = filterPengeluaranRowsForLaporanCetak(financeRows, fokus ?? undefined);
   const pemSlice = pemSource.slice(0, maxFinance);
   const pengSlice = pengSource.slice(0, maxFinance);
 
   const monthlyRows = monthly
-    .map(
-      (m) => `
+    .map((m) => {
+      if (fokus === "kos") {
+        return `
     <tr>
       <td>${esc(m.month)}</td>
-      <td style="text-align:right">${esc(formatRp(m.pemasukan))}</td>
-      <td style="text-align:right">${esc(formatRp(m.pengeluaran))}</td>
-    </tr>`
-    )
+      <td style="text-align:right">${esc(formatRp(m.pemasukanKos))}</td>
+      <td style="text-align:right">${esc(formatRp(m.pengeluaranKos))}</td>
+    </tr>`;
+      }
+      if (fokus === "manajemen") {
+        return `
+    <tr>
+      <td>${esc(m.month)}</td>
+      <td style="text-align:right">${esc(formatRp(m.pemasukanManajemen))}</td>
+      <td style="text-align:right">${esc(formatRp(m.pengeluaranManajemen))}</td>
+    </tr>`;
+      }
+      return `
+    <tr>
+      <td>${esc(m.month)}</td>
+      <td style="text-align:right">${esc(formatRp(m.pemasukanKos))}</td>
+      <td style="text-align:right">${esc(formatRp(m.pengeluaranKos))}</td>
+      <td style="text-align:right">${esc(formatRp(m.pemasukanManajemen))}</td>
+      <td style="text-align:right">${esc(formatRp(m.pengeluaranManajemen))}</td>
+    </tr>`;
+    })
     .join("");
 
   const kamarRows = kamarByStatus
@@ -107,6 +133,7 @@ export function buildLaporanStandaloneHtml(
       (f) => `
     <tr>
       <td>${esc(f.tanggal)}</td>
+      <td>${esc(normalizePengeluaranScope(f.pengeluaranScope) === "manajemen" ? "Manajemen" : "Kos")}</td>
       <td style="text-align:right">${esc(formatRp(f.nominal))}</td>
       <td>${esc(f.lokasiKos)}</td>
       <td>${esc(f.unitBlok)}</td>
@@ -153,6 +180,24 @@ export function buildLaporanStandaloneHtml(
     )
     .join("");
 
+  const monthlyColspanEmpty = !fokus ? 5 : 3;
+
+  const monthlyTheadHtml =
+    fokus === "kos"
+      ? "<thead><tr><th>Bulan</th><th>Masuk kos</th><th>Keluar kos</th></tr></thead>"
+      : fokus === "manajemen"
+        ? "<thead><tr><th>Bulan</th><th>Masuk margin</th><th>Keluar manajemen</th></tr></thead>"
+        : "<thead><tr><th>Bulan</th><th>Masuk kos (sewa)</th><th>Keluar kos</th><th>Masuk margin</th><th>Keluar manaj.</th></tr></thead>";
+
+  const plRichSummaryHtml =
+    fokus === "kos"
+      ? `<strong>P&amp;L kos:</strong> ${esc(formatRp(summary.plKosNominal))} (masuk kos ${esc(formatRp(summary.pemasukanKosTotal))} − keluar kos ${esc(formatRp(summary.pengeluaranKosTotal))}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))} · <strong>Owner view:</strong> ${esc(formatRp(summary.revenueOwnerView ?? summary.pemasukanTotal))}`
+      : fokus === "manajemen"
+        ? `<strong>P&amp;L manajemen:</strong> ${esc(formatRp(summary.plManajemenNominal))} (margin ${esc(formatRp(summary.pemasukanManajemenTotal))} − keluar manajemen ${esc(formatRp(summary.pengeluaranManajemenTotal))}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))}`
+        : `<strong>P&amp;L kos:</strong> ${esc(formatRp(summary.plKosNominal))} (masuk kos ${esc(formatRp(summary.pemasukanKosTotal))} − keluar kos ${esc(formatRp(summary.pengeluaranKosTotal))}) · <strong>P&amp;L manajemen:</strong> ${esc(formatRp(summary.plManajemenNominal))} (margin ${esc(formatRp(summary.pemasukanManajemenTotal))} − keluar manajemen ${esc(formatRp(summary.pengeluaranManajemenTotal))}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))} · <strong>Owner view:</strong> ${esc(formatRp(summary.revenueOwnerView ?? summary.pemasukanTotal))}`;
+
+  const fokusMetaPlain = fokus === "kos" ? "Laporan Kos" : fokus === "manajemen" ? "Laporan Manajemen" : "Laporan lengkap";
+
   const css = `
     body { font-family: Segoe UI, Tahoma, sans-serif; margin: 0; padding: 24px; background: #f7f2ea; color: #1a140e; }
     .wrap { max-width: 960px; margin: 0 auto; background: #ffffff; border: 1px solid #dcc7aa; border-radius: 16px; padding: 28px; }
@@ -198,14 +243,15 @@ export function buildLaporanStandaloneHtml(
       <div><strong>Role (revenue):</strong> ${esc(payload.userProfileRole ?? "—")}</div>
       <div><strong>Periode (finance):</strong> ${esc(filters.startDate)} — ${esc(filters.endDate)}</div>
       <div><strong>Filter lokasi / unit:</strong> ${esc(filters.selectedLokasi)} · ${esc(filters.selectedUnit)}</div>
+      <div><strong>Fokus laporan:</strong> ${esc(fokusMetaPlain)}</div>
     </div>
     <h2 style="margin-top:0">Ringkasan dashboard</h2>
     <div class="kpis">${cardKpis || "<p>Tidak ada ringkasan.</p>"}</div>
-    <p class="meta" style="margin-top:12px"><strong>Pengeluaran (filter):</strong> ${esc(formatRp(summary.pengeluaranTotal))} · <strong>Pemasukan semua POS:</strong> ${esc(formatRp(summary.pemasukanTotal))} · <strong>Revenue tampilan owner:</strong> ${esc(formatRp(summary.revenueOwnerView ?? summary.pemasukanTotal))}</p>
+    <p class="meta" style="margin-top:12px">${plRichSummaryHtml}</p>
     <h2>Keuangan per bulan</h2>
     <table>
-      <thead><tr><th>Bulan</th><th>Pemasukan</th><th>Pengeluaran</th></tr></thead>
-      <tbody>${monthlyRows || "<tr><td colspan='3'>Tidak ada data</td></tr>"}</tbody>
+      ${monthlyTheadHtml}
+      <tbody>${monthlyRows || `<tr><td colspan='${monthlyColspanEmpty}'>Tidak ada data</td></tr>`}</tbody>
     </table>
     <h2>Status kamar</h2>
     <table>
@@ -219,8 +265,8 @@ export function buildLaporanStandaloneHtml(
     </table>
     <h2>Detail pengeluaran (${esc(String(pengSource.length))}${pengSource.length > maxFinance ? `, menampilkan ${maxFinance} pertama` : ""})</h2>
     <table>
-      <thead><tr><th>Tanggal</th><th>Nominal</th><th>Lokasi</th><th>Unit</th></tr></thead>
-      <tbody>${pengRowsHtml || "<tr><td colspan='4'>Tidak ada data</td></tr>"}</tbody>
+      <thead><tr><th>Tanggal</th><th>Lingkup</th><th>Nominal</th><th>Lokasi</th><th>Unit</th></tr></thead>
+      <tbody>${pengRowsHtml || "<tr><td colspan='5'>Tidak ada data</td></tr>"}</tbody>
     </table>
     <h2>Penghuni (${esc(String(penghuniRows.length))})</h2>
     <table>
@@ -241,7 +287,17 @@ export function buildLaporanStandaloneHtml(
 export function buildEmailBodySummary(payload: LaporanExportPayloadV1): string {
   const s = payload.summary;
   const f = payload.filters;
-  const cardLines = (payload.dashboardCards ?? []).map((c) => `- ${c.label}: ${c.value} — ${c.note}`);
+  const fokusLine =
+    payload.laporanFokus === "kos"
+      ? "Fokus: Laporan Kos"
+      : payload.laporanFokus === "manajemen"
+        ? "Fokus: Laporan Manajemen"
+        : "Fokus: Laporan lengkap";
+  const cardsFiltered = filterDashboardCardsByLaporanFokus(
+    payload.dashboardCards ?? [],
+    payload.laporanFokus ?? undefined
+  );
+  const cardLines = cardsFiltered.map((c) => `- ${c.label}: ${c.value} — ${c.note}`);
   const lines = [
     `Laporan Second Room`,
     `Dibuat: ${formatIdDateTime(payload.generatedAt)}`,
@@ -249,13 +305,19 @@ export function buildEmailBodySummary(payload: LaporanExportPayloadV1): string {
     `Role: ${payload.userProfileRole ?? "—"}`,
     `Periode finance: ${f.startDate} s/d ${f.endDate}`,
     `Filter: ${f.selectedLokasi} | ${f.selectedUnit}`,
+    fokusLine,
     ``,
     `Ringkasan dashboard:`,
     ...cardLines,
     ``,
-    `Pengeluaran: ${formatRp(s.pengeluaranTotal)}`,
-    `Pemasukan (semua POS): ${formatRp(s.pemasukanTotal)}`,
-    `Revenue (owner view): ${formatRp(s.revenueOwnerView ?? s.pemasukanTotal)}`,
+    `Pemasukan kos (sewa kamar): ${formatRp(s.pemasukanKosTotal)}`,
+    `Pengeluaran kos: ${formatRp(s.pengeluaranKosTotal)}`,
+    `Pengeluaran manajemen: ${formatRp(s.pengeluaranManajemenTotal)}`,
+    `P&L kos: ${formatRp(s.plKosNominal)}`,
+    `Pemasukan manajemen: ${formatRp(s.pemasukanManajemenTotal)}`,
+    `P&L manajemen: ${formatRp(s.plManajemenNominal)}`,
+    `Total pemasukan: ${formatRp(s.pemasukanTotal)}`,
+    `Revenue owner (tanpa deposit/booking): ${formatRp(s.revenueOwnerView ?? s.pemasukanTotal)}`,
     ``,
     `Detail: lampirkan berkas HTML dari tombol Unduh di tab laporan.`,
   ];

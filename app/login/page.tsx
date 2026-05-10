@@ -2,41 +2,71 @@
 
 import { FormEvent, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { supabase } from "../../libsupabaseClient";
-import { Eye, EyeOff } from "lucide-react";
+import { getBrowserSupabase } from "@/lib/supabase-browser";
+import { credentialToSupabaseLoginEmail } from "@/lib/internal-auth-email";
+import { ChevronDown, ChevronUp, Eye, EyeOff, MessageCircle } from "lucide-react";
+
+/** 081338387417 → format wa.me (tanpa +) */
+const WHATSAPP_ADMIN_WA_ME = "6281338387417";
+
+function buildPasswordRequestWhatsAppUrl(loginHint: string): string {
+  const hint = loginHint.trim();
+  const text = hint
+    ? `Halo Admin, saya lupa password untuk akun: ${hint}. Mohon bantu memberikan informasi password. Terima kasih.`
+    : `Halo Admin, saya lupa password. Mohon bantu memberikan informasi password. Terima kasih.`;
+  return `https://wa.me/${WHATSAPP_ADMIN_WA_ME}?text=${encodeURIComponent(text)}`;
+}
 
 export default function LoginPage() {
-  const router = useRouter();
   const [credential, setCredential] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [showForgotPanel, setShowForgotPanel] = useState(false);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage("");
     setIsSubmitting(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: credential.trim(),
-      password,
-    });
-
-    if (error) {
-      setErrorMessage(error.message);
+    const supabase = getBrowserSupabase();
+    if (!supabase) {
+      setErrorMessage(
+        "Konfigurasi Supabase tidak lengkap. Pasang NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY di .env.local lalu jalankan ulang dev server.",
+      );
       setIsSubmitting(false);
       return;
     }
 
-    router.push("/dashboard");
-    router.refresh();
+    let error: Error | { message: string } | null = null;
+    try {
+      const out = await supabase.auth.signInWithPassword({
+        email: credentialToSupabaseLoginEmail(credential),
+        password,
+      });
+      error = out.error;
+    } catch (e) {
+      error = e instanceof Error ? e : { message: String(e) };
+    }
+
+    if (error) {
+      setErrorMessage("message" in error ? error.message : "Login gagal.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Hard navigation: menghindari client transition yang macet jika kompilasi route berat/Turbopack error.
+    window.location.assign("/dashboard");
+  };
+
+  const openPasswordRequestWhatsApp = () => {
+    const url = buildPasswordRequestWhatsAppUrl(credential);
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1a1340] px-6 py-10 text-[#1f1b42]">
+    <main className="safe-page-auth relative flex min-h-[100dvh] min-h-screen items-center justify-center overflow-hidden bg-[#1a1340] text-[#1f1b42]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_18%,rgba(167,139,250,0.38),transparent_46%),radial-gradient(circle_at_88%_12%,rgba(59,130,246,0.3),transparent_42%),radial-gradient(circle_at_76%_82%,rgba(109,40,217,0.32),transparent_48%),radial-gradient(circle_at_24%_78%,rgba(37,99,235,0.22),transparent_40%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-70 [background:linear-gradient(125deg,rgba(30,27,75,0.5)_0%,rgba(76,29,149,0.35)_28%,rgba(30,64,175,0.28)_58%,rgba(109,40,217,0.4)_100%)]" />
 
@@ -49,6 +79,7 @@ export default function LoginPage() {
               width={280}
               height={116}
               priority
+              unoptimized
               className="h-auto w-[220px] object-contain sm:w-[250px]"
             />
           </div>
@@ -67,7 +98,7 @@ export default function LoginPage() {
 
         <form className="space-y-6" onSubmit={handleLogin}>
           <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            Login menggunakan akun Supabase.
+            Silahkan login dengan akun anda.
           </p>
           <div className="space-y-2">
             <label
@@ -78,9 +109,10 @@ export default function LoginPage() {
             </label>
             <input
               id="credential"
-              type="email"
+              type="text"
               required
-              placeholder="nama@email.com"
+              autoComplete="username"
+              placeholder="username_anda"
               value={credential}
               onChange={(event) => setCredential(event.target.value)}
               className="w-full rounded-2xl border border-[#d5ddff] bg-[#f8f9ff] px-4 py-3 text-sm text-[#1f1b42] outline-none ring-[#8ea2ff] transition focus:ring-2"
@@ -116,13 +148,42 @@ export default function LoginPage() {
           </div>
 
           <div className="flex justify-end">
-            <Link
-              href="#"
-              className="text-xs font-medium tracking-[0.15em] text-[#5d6fc0] underline decoration-[#9aaeff] underline-offset-4 transition hover:text-[#3f4f9d]"
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs font-medium tracking-[0.15em] text-[#5d6fc0] underline decoration-[#9aaeff] underline-offset-4 transition hover:text-[#3f4f9d]"
+              aria-expanded={showForgotPanel}
+              onClick={() => setShowForgotPanel((p) => !p)}
             >
               Lupa Password
-            </Link>
+              {showForgotPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
           </div>
+
+          {showForgotPanel ? (
+            <div className="rounded-2xl border border-[#c8d3ff] bg-[#f4f7ff]/90 p-4 dark:border-[#424a80] dark:bg-[#1b1f3d]/80">
+              <p className="mb-4 text-sm leading-relaxed text-[#1f1b42] dark:text-[#e2e8ff]">
+                Untuk mengetahui password anda, silahkan klik tombol di bawah, anda akan diberikan informasi
+                password anda melalui whatsapp
+              </p>
+              <button
+                type="button"
+                onClick={openPasswordRequestWhatsApp}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_-8px_rgba(37,211,102,0.65)] transition hover:bg-[#20bd5a] focus:outline-none focus:ring-2 focus:ring-[#128C7E] focus:ring-offset-2"
+              >
+                <MessageCircle size={20} className="shrink-0" aria-hidden />
+                Request Password via WhatsApp
+              </button>
+              {credential.trim() ? (
+                <p className="mt-3 text-[0.65rem] leading-relaxed text-[#6f7dc2]">
+                  Pesan WhatsApp akan menyertakan username/email yang Anda ketik di kolom login di atas.
+                </p>
+              ) : (
+                <p className="mt-3 text-[0.65rem] leading-relaxed text-[#6f7dc2]">
+                  Opsional: isi username atau email di kolom login agar admin tahu akun mana yang dimaksud.
+                </p>
+              )}
+            </div>
+          ) : null}
 
           {errorMessage ? (
             <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">

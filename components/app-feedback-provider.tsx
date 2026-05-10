@@ -11,10 +11,14 @@ import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 
 export type ToastVariant = "success" | "error" | "info";
 
+/** Default = pojok atas kanan; center = tengah layar; top = tengah atas (banner) */
+export type ToastPosition = "default" | "center" | "top";
+
 type ToastItem = {
   id: string;
   message: string;
   variant: ToastVariant;
+  position: ToastPosition;
 };
 
 export type ConfirmOptions = {
@@ -31,7 +35,7 @@ type ConfirmState = ConfirmOptions & {
 };
 
 type AppFeedbackContextValue = {
-  toast: (message: string, variant?: ToastVariant) => void;
+  toast: (message: string, variant?: ToastVariant, position?: ToastPosition) => void;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
 };
 
@@ -61,12 +65,12 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
-  const toast = useCallback((message: string, variant: ToastVariant = "success") => {
+  const toast = useCallback((message: string, variant: ToastVariant = "success", position: ToastPosition = "default") => {
     const id = `toast-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setToasts((prev) => [...prev, { id, message, variant }]);
+    setToasts((prev) => [...prev, { id, message, variant, position }]);
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4200);
+    }, position === "center" ? 5200 : 4200);
   }, []);
 
   const confirm = useCallback((options: ConfirmOptions) => {
@@ -99,26 +103,78 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
       {children}
 
       <div
+        className="pointer-events-none fixed inset-x-0 top-4 z-[392] flex flex-col items-center gap-2 px-4 sm:px-6"
+        aria-live="polite"
+      >
+        {toasts
+          .filter((t) => t.position === "top")
+          .map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex w-full max-w-lg gap-2 rounded-2xl border px-4 py-3 text-sm shadow-lg transition duration-200 ease-out motion-safe:animate-[sr-toast-in_0.28s_ease-out] sm:justify-center ${toastTone(t.variant)}`}
+            >
+              <ToastIcon variant={t.variant} />
+              <p className="min-w-0 flex-1 text-center leading-snug sm:text-center">{t.message}</p>
+              <button
+                type="button"
+                onClick={() => dismissToast(t.id)}
+                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+      </div>
+
+      <div
         className="pointer-events-none fixed inset-x-0 top-20 z-[390] flex flex-col items-end gap-2 px-4 sm:px-6"
         aria-live="polite"
       >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto flex max-w-sm gap-2 rounded-2xl border px-4 py-3 text-sm shadow-lg transition duration-200 ease-out motion-safe:animate-[sr-toast-in_0.28s_ease-out] ${toastTone(t.variant)}`}
-          >
-            <ToastIcon variant={t.variant} />
-            <p className="min-w-0 flex-1 leading-snug">{t.message}</p>
-            <button
-              type="button"
-              onClick={() => dismissToast(t.id)}
-              className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
-              aria-label="Tutup notifikasi"
+        {toasts
+          .filter((t) => t.position === "default")
+          .map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex max-w-sm gap-2 rounded-2xl border px-4 py-3 text-sm shadow-lg transition duration-200 ease-out motion-safe:animate-[sr-toast-in_0.28s_ease-out] ${toastTone(t.variant)}`}
             >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
+              <ToastIcon variant={t.variant} />
+              <p className="min-w-0 flex-1 leading-snug">{t.message}</p>
+              <button
+                type="button"
+                onClick={() => dismissToast(t.id)}
+                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+      </div>
+
+      <div
+        className="pointer-events-none fixed inset-0 z-[389] flex flex-col items-center justify-center gap-3 p-6"
+        aria-live="polite"
+      >
+        {toasts
+          .filter((t) => t.position === "center")
+          .map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex max-w-md gap-3 rounded-2xl border px-5 py-4 text-base shadow-xl transition motion-safe:animate-[sr-toast-center-in_0.35s_ease-out] ${toastTone(t.variant)}`}
+            >
+              <ToastIcon variant={t.variant} />
+              <p className="min-w-0 flex-1 text-center leading-snug sm:text-left">{t.message}</p>
+              <button
+                type="button"
+                onClick={() => dismissToast(t.id)}
+                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
       </div>
 
       {confirmState ? (
@@ -139,6 +195,15 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
             className="relative z-[1] w-full max-w-md rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] p-6 shadow-2xl dark:border-[#4d3925] dark:bg-[#1f1710]"
             onClick={(e) => e.stopPropagation()}
           >
+            {confirmState.destructive ? (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-400/70 bg-amber-50 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-600/70 dark:bg-amber-950/55 dark:text-amber-50">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                <p>
+                  <span className="font-semibold">Peringatan.</span> Tindakan bersifat permanen. Lanjutkan hanya jika Anda
+                  yakin.
+                </p>
+              </div>
+            ) : null}
             <h2
               id="app-confirm-title"
               className="text-lg font-semibold text-[#2c2218] dark:text-[#f5e8d4]"

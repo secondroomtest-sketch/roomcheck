@@ -54,7 +54,7 @@ export default async function RegistrationPrintPage({
   const tglCheckOut = formatTanggalLengkap(field(params, "tglCheckOut"));
 
   return (
-    <main style={{ background: "#ffffff", minHeight: "100vh", margin: 0 }}>
+    <main className="safe-print-screen" style={{ background: "#ffffff", minHeight: "100vh", margin: 0 }}>
       <style>{`
         :root {
           --ink: #2d1f48;

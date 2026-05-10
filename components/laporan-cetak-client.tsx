@@ -6,6 +6,11 @@ import Link from "next/link";
 import { Printer, Download, Mail, ArrowLeft } from "lucide-react";
 import { LAPORAN_EXPORT_STORAGE_KEY, type LaporanExportPayloadV1 } from "@/lib/laporan-export-types";
 import {
+  filterDashboardCardsByLaporanFokus,
+  filterPemasukanRowsForLaporanCetak,
+  filterPengeluaranRowsForLaporanCetak,
+} from "@/lib/laporan-cetak-filters";
+import {
   buildEmailBodySummary,
   buildLaporanStandaloneHtml,
   fetchReportLogoDataUrl,
@@ -56,30 +61,35 @@ export default function LaporanCetakClient() {
   }, []);
 
   const maxFinance = 80;
+  const fokus = payload?.laporanFokus;
+
   const pemFinanceTable = useMemo(() => {
     if (!payload) return [];
-    return payload.financeRows.filter((r) => r.kategori === "Pemasukan").slice(0, maxFinance);
-  }, [payload]);
+    return filterPemasukanRowsForLaporanCetak(payload.financeRows, fokus ?? undefined).slice(0, maxFinance);
+  }, [fokus, payload]);
+
   const pengFinanceTable = useMemo(() => {
     if (!payload) return [];
-    return payload.financeRows.filter((r) => r.kategori === "Pengeluaran").slice(0, maxFinance);
-  }, [payload]);
+    return filterPengeluaranRowsForLaporanCetak(payload.financeRows, fokus ?? undefined).slice(0, maxFinance);
+  }, [fokus, payload]);
+
   const financeRowCounts = useMemo(() => {
     if (!payload) return { pem: 0, peng: 0 };
-    let pem = 0;
-    let peng = 0;
-    for (const r of payload.financeRows) {
-      if (r.kategori === "Pemasukan") pem += 1;
-      else peng += 1;
-    }
-    return { pem, peng };
-  }, [payload]);
+    const pemRows = filterPemasukanRowsForLaporanCetak(payload.financeRows, fokus ?? undefined);
+    const pengRows = filterPengeluaranRowsForLaporanCetak(payload.financeRows, fokus ?? undefined);
+    return { pem: pemRows.length, peng: pengRows.length };
+  }, [fokus, payload]);
 
   const monthlyMax = useMemo(() => {
     if (!payload?.monthly.length) return 1;
+    const fk = payload.laporanFokus;
     return Math.max(
       1,
-      ...payload.monthly.map((m) => Math.max(m.pemasukan, m.pengeluaran))
+      ...payload.monthly.flatMap((m) => {
+        if (fk === "kos") return [m.pemasukanKos, m.pengeluaranKos];
+        if (fk === "manajemen") return [m.pemasukanManajemen, m.pengeluaranManajemen];
+        return [m.pemasukanKos, m.pemasukanManajemen, m.pengeluaranKos, m.pengeluaranManajemen];
+      })
     );
   }, [payload]);
 
@@ -142,7 +152,8 @@ export default function LaporanCetakClient() {
 
   const s = payload.summary;
   const f = payload.filters;
-  const cards =
+  const fokusCetak = payload.laporanFokus;
+  const cardsRaw =
     payload.dashboardCards?.length > 0
       ? payload.dashboardCards
       : [
@@ -157,6 +168,7 @@ export default function LaporanCetakClient() {
             note: "Ringkasan",
           },
         ];
+  const cards = filterDashboardCardsByLaporanFokus(cardsRaw, fokusCetak ?? undefined);
 
   return (
     <div className="min-h-screen bg-[#f7f2ea] pb-16 text-[#1a140e] print:bg-white print:pb-0">
@@ -257,6 +269,16 @@ export default function LaporanCetakClient() {
                 </dd>
               </div>
               <div>
+                <dt className="font-semibold text-[#6b5238]">Fokus laporan</dt>
+                <dd>
+                  {fokusCetak === "kos"
+                    ? "Laporan Kos"
+                    : fokusCetak === "manajemen"
+                      ? "Laporan Manajemen"
+                      : "Laporan lengkap"}
+                </dd>
+              </div>
+              <div>
                 <dt className="font-semibold text-[#6b5238]">Role (revenue)</dt>
                 <dd>{payload.userProfileRole || "—"}</dd>
               </div>
@@ -271,7 +293,7 @@ export default function LaporanCetakClient() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {cards.map((card, i) => (
               <div
-                key={card.label}
+                key={`${card.label}-${i}`}
                 className={`rounded-2xl border-2 p-4 shadow-sm print:break-inside-avoid ${LAPORAN_CARD_SURFACE_CLASSES[i % LAPORAN_CARD_SURFACE_CLASSES.length]}`}
               >
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8c6d47]">{card.label}</p>
@@ -280,13 +302,36 @@ export default function LaporanCetakClient() {
               </div>
             ))}
           </div>
-          <div className="mt-4 rounded-2xl border border-[#e8dcc9] bg-[#fdf9f2] px-4 py-3 text-sm text-[#4a3824]">
-            <p className="font-medium text-[#6b5238]">Pengeluaran (filter periode)</p>
-            <p className="text-lg font-semibold text-[#b91c1c]">{formatRp(s.pengeluaranTotal)}</p>
-            <p className="mt-2 text-xs text-[#6b5238]">
-              Pemasukan semua POS: {formatRp(s.pemasukanTotal)} · Tampilan owner: {formatRp(s.revenueOwnerView)} (
-              {s.pemasukanTransactionCountOwnerView} transaksi)
-            </p>
+          <div className="mt-4 space-y-3 rounded-2xl border border-[#e8dcc9] bg-[#fdf9f2] px-4 py-3 text-sm text-[#4a3824]">
+            {fokusCetak !== "manajemen" ? (
+              <div>
+                <p className="font-medium text-[#6b5238]">P&amp;L kos</p>
+                <p className="text-lg font-semibold text-[#166534]">{formatRp(s.plKosNominal)}</p>
+                <p className="text-xs text-[#6b5238]">
+                  Pemasukan kos {formatRp(s.pemasukanKosTotal)} − pengeluaran kos{" "}
+                  {formatRp(s.pengeluaranKosTotal)}
+                </p>
+              </div>
+            ) : null}
+            {fokusCetak !== "kos" ? (
+              <div className={fokusCetak === undefined ? "border-t border-[#e0d2c0] pt-3" : ""}>
+                <p className="font-medium text-[#6b5238]">P&amp;L manajemen</p>
+                <p className="text-lg font-semibold text-[#047857]">{formatRp(s.plManajemenNominal)}</p>
+                <p className="text-xs text-[#6b5238]">
+                  Pemasukan manajemen {formatRp(s.pemasukanManajemenTotal)} − pengeluaran manajemen{" "}
+                  {formatRp(s.pengeluaranManajemenTotal)}
+                </p>
+              </div>
+            ) : null}
+            <div
+              className={
+                fokusCetak === undefined ? "border-t border-[#e0d2c0] pt-3 text-xs text-[#6b5238]" : "text-xs text-[#6b5238]"
+              }
+            >
+              Total pemasukan: {formatRp(s.pemasukanTotal)} · Total pengeluaran: {formatRp(s.pengeluaranTotal)} ·
+              Revenue owner (deposit/booking tidak dijumlahkan): {formatRp(s.revenueOwnerView)} (
+              {s.pemasukanTransactionCountOwnerView} trans.)
+            </div>
           </div>
         </section>
 
@@ -296,30 +341,99 @@ export default function LaporanCetakClient() {
             {payload.monthly.length === 0 ? (
               <p className="text-sm text-[#6b5238]">Tidak ada transaksi pada periode ini.</p>
             ) : (
-              payload.monthly.map((m) => (
-                <div key={m.month}>
-                  <div className="mb-1 flex justify-between text-xs text-[#5c472d]">
-                    <span className="font-medium">{m.month}</span>
-                    <span>
-                      <span className="text-[#166534]">{formatRp(m.pemasukan)}</span>
-                      {" · "}
-                      <span className="text-[#b91c1c]">{formatRp(m.pengeluaran)}</span>
-                    </span>
+              payload.monthly.map((m) => {
+                const fk = payload.laporanFokus;
+                if (fk === "kos") {
+                  return (
+                    <div key={m.month}>
+                      <div className="mb-1 flex flex-col gap-1 text-xs text-[#5c472d] sm:flex-row sm:justify-between">
+                        <span className="font-medium">{m.month}</span>
+                        <span className="text-right text-[10px] leading-snug sm:text-xs">
+                          <span className="text-[#14532d]">Masuk kos {formatRp(m.pemasukanKos)}</span>
+                          {" · "}
+                          <span className="text-[#b91c1c]">Keluar kos {formatRp(m.pengeluaranKos)}</span>
+                        </span>
+                      </div>
+                      <div className="flex h-3 gap-px overflow-hidden rounded-full bg-[#f0e4d4]">
+                        <div
+                          className="bg-[#15803d]"
+                          style={{ width: `${(m.pemasukanKos / monthlyMax) * 100}%` }}
+                          title="Pemasukan kos"
+                        />
+                        <div
+                          className="bg-[#ef4444]"
+                          style={{ width: `${(m.pengeluaranKos / monthlyMax) * 100}%` }}
+                          title="Pengeluaran kos"
+                        />
+                      </div>
+                    </div>
+                  );
+                }
+                if (fk === "manajemen") {
+                  return (
+                    <div key={m.month}>
+                      <div className="mb-1 flex flex-col gap-1 text-xs text-[#5c472d] sm:flex-row sm:justify-between">
+                        <span className="font-medium">{m.month}</span>
+                        <span className="text-right text-[10px] leading-snug sm:text-xs">
+                          <span className="text-[#047857]">Margin {formatRp(m.pemasukanManajemen)}</span>
+                          {" · "}
+                          <span className="text-[#c2410c]">Keluar manajemen {formatRp(m.pengeluaranManajemen)}</span>
+                        </span>
+                      </div>
+                      <div className="flex h-3 gap-px overflow-hidden rounded-full bg-[#f0e4d4]">
+                        <div
+                          className="bg-[#34d399]"
+                          style={{ width: `${(m.pemasukanManajemen / monthlyMax) * 100}%` }}
+                          title="Pemasukan manajemen"
+                        />
+                        <div
+                          className="bg-[#ea580c]"
+                          style={{ width: `${(m.pengeluaranManajemen / monthlyMax) * 100}%` }}
+                          title="Pengeluaran manajemen"
+                        />
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={m.month}>
+                    <div className="mb-1 flex flex-col gap-1 text-xs text-[#5c472d] sm:flex-row sm:justify-between">
+                      <span className="font-medium">{m.month}</span>
+                      <span className="text-right text-[10px] leading-snug sm:text-xs">
+                        <span className="text-[#14532d]">Masuk kos {formatRp(m.pemasukanKos)}</span>
+                        {" · "}
+                        <span className="text-[#b91c1c]">Keluar kos {formatRp(m.pengeluaranKos)}</span>
+                        {" · "}
+                        <span className="text-[#047857]">Masuk manajemen {formatRp(m.pemasukanManajemen)}</span>
+                        {" · "}
+                        <span className="text-[#c2410c]">Keluar manajemen {formatRp(m.pengeluaranManajemen)}</span>
+                      </span>
+                    </div>
+                    <div className="flex h-3 gap-px overflow-hidden rounded-full bg-[#f0e4d4]">
+                      <div
+                        className="bg-[#15803d]"
+                        style={{ width: `${(m.pemasukanKos / monthlyMax) * 100}%` }}
+                        title="Pemasukan kos"
+                      />
+                      <div
+                        className="bg-[#ef4444]"
+                        style={{ width: `${(m.pengeluaranKos / monthlyMax) * 100}%` }}
+                        title="Pengeluaran kos"
+                      />
+                      <div
+                        className="bg-[#34d399]"
+                        style={{ width: `${(m.pemasukanManajemen / monthlyMax) * 100}%` }}
+                        title="Pemasukan manajemen"
+                      />
+                      <div
+                        className="bg-[#ea580c]"
+                        style={{ width: `${(m.pengeluaranManajemen / monthlyMax) * 100}%` }}
+                        title="Pengeluaran manajemen"
+                      />
+                    </div>
                   </div>
-                  <div className="flex h-3 overflow-hidden rounded-full bg-[#f0e4d4]">
-                    <div
-                      className="bg-[#22c55e]"
-                      style={{ width: `${(m.pemasukan / monthlyMax) * 100}%` }}
-                      title="Pemasukan"
-                    />
-                    <div
-                      className="bg-[#ef4444]"
-                      style={{ width: `${(m.pengeluaran / monthlyMax) * 100}%` }}
-                      title="Pengeluaran"
-                    />
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>

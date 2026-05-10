@@ -1,5 +1,17 @@
 -- Sync schema to match current frontend usage.
--- Run this in Supabase SQL Editor.
+-- Supabase: salin SELURUH file ini, tempel SEKALI di SQL Editor, lalu jalankan (Ctrl+Enter).
+--          Banyak perintah dalam satu paste = tetap satu “run”; idempotent untuk sebagian besar langkah.
+--          Perbaikan `finance_kategori_pengeluaran_scope_check` (Pemasukan kos/manajemen)
+--          hanya dibuat di akhir blok migrasi finance — tanpa constraint sementara yang salah.
+--
+-- After this, optional one-off fixes (only if you need them):
+--   repair_profiles_scope.sql     — dashboard kosong karena akses_lokasi/blok kosong
+--   strict_production_rls.sql     — RLS ketat produksi
+--   create_super_admin.sql      — bootstrap admin
+--
+-- Catatan: file add_pengeluaran_scope.sql, finance_kategori_split_pengeluaran_tipe.sql,
+-- add_pemasukan_scope_kind.sql, add_username_login.sql tetap ada untuk riwayat; isinya
+-- sudah digabung di bawah agar skema selaras dengan kode terbaru.
 
 create extension if not exists pgcrypto;
 
@@ -18,7 +30,7 @@ $$;
 -- =========================
 create table if not exists public.finance_kategori (
   id uuid primary key default gen_random_uuid(),
-  tipe text not null default 'Pemasukan' check (tipe in ('Pemasukan', 'Pengeluaran')),
+  tipe text not null default 'Pemasukan manajemen',
   nama_pos text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -108,6 +120,12 @@ alter table public.user_profiles add column if not exists created_at timestamptz
 alter table public.user_profiles add column if not exists updated_at timestamptz not null default now();
 update public.user_profiles set role = coalesce(role, 'staff');
 
+alter table public.user_profiles add column if not exists username text;
+
+create unique index if not exists uniq_user_profiles_username
+  on public.user_profiles(username)
+  where username is not null and trim(username) <> '';
+
 drop trigger if exists trg_user_profiles_updated_at on public.user_profiles;
 create trigger trg_user_profiles_updated_at
 before update on public.user_profiles
@@ -177,6 +195,8 @@ alter table public.penghuni add column if not exists no_kamar text;
 alter table public.penghuni add column if not exists periode_sewa_bulan integer not null default 1;
 alter table public.penghuni add column if not exists tgl_check_in date;
 alter table public.penghuni add column if not exists tgl_check_out date;
+alter table public.penghuni add column if not exists sewa_cycle_start date;
+alter table public.penghuni add column if not exists sewa_cycle_end date;
 alter table public.penghuni add column if not exists harga_bulanan numeric not null default 0;
 alter table public.penghuni add column if not exists booking_fee numeric not null default 0;
 alter table public.penghuni add column if not exists sewa_kamar_paid boolean not null default false;
@@ -189,6 +209,11 @@ alter table public.penghuni add column if not exists keterangan text;
 alter table public.penghuni add column if not exists created_at timestamptz not null default now();
 alter table public.penghuni add column if not exists updated_at timestamptz not null default now();
 update public.penghuni set status = coalesce(status, 'Booking');
+update public.penghuni
+set
+  sewa_cycle_start = coalesce(sewa_cycle_start, tgl_check_in),
+  sewa_cycle_end = coalesce(sewa_cycle_end, tgl_check_out)
+where coalesce(status, 'Booking') = 'Stay';
 create index if not exists idx_penghuni_status on public.penghuni(status);
 create index if not exists idx_penghuni_created_at on public.penghuni(created_at desc);
 
@@ -251,6 +276,309 @@ create trigger trg_finance_updated_at
 before update on public.finance
 for each row
 execute function public.set_updated_at();
+
+-- =========================
+-- Finance: scope columns + split tipe POS (sinkron dengan components/master-page-client &
+-- finance-page-client insert/update).
+-- =========================
+
+-- Lepaskan dulu semua CHECK yang kita kelola: data lama / re-run skrip tidak terjebak
+-- constraint versi lama (mis. tipe hanya 'Pemasukan') sebelum UPDATE normalisasi.
+alter table public.finance_kategori
+  drop constraint if exists finance_kategori_tipe_check;
+alter table public.finance_kategori
+  drop constraint if exists finance_kategori_pemasukan_scope_kind_check;
+alter table public.finance_kategori
+  drop constraint if exists finance_kategori_pengeluaran_scope_check;
+
+-- From add_pengeluaran_scope.sql
+alter table public.finance_kategori
+  add column if not exists pengeluaran_scope text;
+
+update public.finance_kategori
+set pengeluaran_scope = 'kos'
+where lower(trim(tipe)) in ('pengeluaran', 'pengeluaran kos')
+  and (pengeluaran_scope is null or trim(pengeluaran_scope) = '');
+
+update public.finance_kategori
+set pengeluaran_scope = 'manajemen'
+where lower(trim(tipe)) = 'pengeluaran manajemen'
+  and (pengeluaran_scope is null or trim(pengeluaran_scope) = '');
+
+update public.finance_kategori
+set pengeluaran_scope = null
+where lower(trim(tipe)) = 'pemasukan';
+
+alter table public.finance
+  add column if not exists pengeluaran_scope text;
+
+update public.finance f
+set pengeluaran_scope = k.pengeluaran_scope
+from public.finance_kategori k
+where f.kategori = 'Pengeluaran'
+  and trim(f.pos) <> ''
+  and trim(k.nama_pos) <> ''
+  and lower(trim(f.pos)) = lower(trim(k.nama_pos))
+  and (f.pengeluaran_scope is null or trim(f.pengeluaran_scope) = '');
+
+update public.finance
+set pengeluaran_scope = 'kos'
+where kategori = 'Pengeluaran'
+  and (pengeluaran_scope is null or trim(pengeluaran_scope) = '');
+
+update public.finance
+set pengeluaran_scope = null
+where kategori = 'Pemasukan';
+
+alter table public.finance
+  drop constraint if exists finance_row_pengeluaran_scope_check;
+
+alter table public.finance
+  add constraint finance_row_pengeluaran_scope_check
+  check (
+    kategori = 'Pemasukan'
+    or pengeluaran_scope in ('kos', 'manajemen')
+  );
+
+-- From finance_kategori_split_pengeluaran_tipe.sql
+update public.finance_kategori
+set tipe = case
+  when lower(coalesce(trim(pengeluaran_scope), '')) = 'manajemen' then 'Pengeluaran manajemen'
+  else 'Pengeluaran kos'
+end
+where lower(trim(tipe)) = 'pengeluaran';
+
+update public.finance_kategori
+set pengeluaran_scope = 'kos'
+where lower(trim(tipe)) = 'pengeluaran kos'
+  and (pengeluaran_scope is null or trim(pengeluaran_scope) = '' or lower(trim(pengeluaran_scope)) <> 'kos');
+
+update public.finance_kategori
+set pengeluaran_scope = 'manajemen'
+where lower(trim(tipe)) = 'pengeluaran manajemen'
+  and (pengeluaran_scope is null or trim(pengeluaran_scope) = '' or lower(trim(pengeluaran_scope)) <> 'manajemen');
+
+update public.finance_kategori
+set pengeluaran_scope = null
+where lower(trim(tipe)) = 'pemasukan';
+
+-- Jangan pasang finance_kategori_tipe_check di sini. Constraint sementara
+-- (hanya 'Pemasukan' + pengeluaran) memblok UPDATE/INSERT ke 'Pemasukan kos' / 'Pemasukan manajemen'.
+-- Satu constraint final dipasang setelah semua UPDATE di bawah selesai.
+
+-- From add_pemasukan_scope_kind.sql
+alter table public.finance_kategori
+  add column if not exists pemasukan_scope text;
+
+alter table public.finance_kategori
+  add column if not exists pemasukan_kind text;
+
+update public.finance_kategori
+set tipe = 'Pemasukan kos'
+where lower(trim(tipe)) in ('pemasukan kos - sewa kamar', 'pemasukan kos - booking fee');
+
+update public.finance_kategori
+set pemasukan_scope = 'kos',
+    pemasukan_kind = case
+      when lower(trim(coalesce(nama_pos, ''))) = 'sewa kamar' then 'sewa_kamar'
+      when lower(trim(coalesce(nama_pos, ''))) = 'booking fee' then 'booking_fee'
+      else 'lain'
+    end
+where lower(trim(tipe)) = 'pemasukan kos';
+
+update public.finance_kategori
+set tipe = 'Pemasukan manajemen',
+    pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain'
+where lower(trim(tipe)) = 'pemasukan kos'
+  and lower(trim(coalesce(nama_pos, ''))) not in ('sewa kamar', 'booking fee');
+
+-- Pemasukan generik legacy -> selaras frontend (normalizeFinanceTipe).
+update public.finance_kategori
+set tipe = 'Pemasukan kos',
+    pemasukan_scope = 'kos',
+    pemasukan_kind = case
+      when lower(trim(coalesce(nama_pos, ''))) = 'sewa kamar' then 'sewa_kamar'
+      when lower(trim(coalesce(nama_pos, ''))) = 'booking fee' then 'booking_fee'
+      else 'lain'
+    end
+where lower(trim(tipe)) = 'pemasukan'
+  and lower(trim(coalesce(nama_pos, ''))) in ('sewa kamar', 'booking fee');
+
+update public.finance_kategori
+set tipe = 'Pemasukan manajemen',
+    pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain'
+where lower(trim(tipe)) = 'pemasukan';
+
+update public.finance_kategori
+set pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain'
+where lower(trim(tipe)) = 'pemasukan manajemen';
+
+update public.finance_kategori
+set pemasukan_scope = null,
+    pemasukan_kind = null
+where lower(trim(tipe)) like 'pengeluaran%';
+
+-- Normalisasi sebelum CHECK final: spasi / sisa tipe legacy / kombinasi tak konsisten.
+update public.finance_kategori
+set tipe = btrim(tipe),
+    nama_pos = btrim(nama_pos);
+
+update public.finance_kategori
+set tipe = case
+  when lower(coalesce(trim(pengeluaran_scope), '')) = 'manajemen' then 'Pengeluaran manajemen'
+  else 'Pengeluaran kos'
+end
+where lower(btrim(tipe)) = 'pengeluaran';
+
+update public.finance_kategori
+set tipe = 'Pemasukan manajemen',
+    pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain',
+    pengeluaran_scope = null
+where btrim(tipe) = 'Pemasukan';
+
+-- Lengkapi Pemasukan kos yang belum punya kombinasi scope/kind yang valid (infer dari nama POS).
+update public.finance_kategori
+set pemasukan_scope = 'kos',
+    pemasukan_kind = case
+      when lower(btrim(coalesce(nama_pos, ''))) = 'sewa kamar' then 'sewa_kamar'
+      when lower(btrim(coalesce(nama_pos, ''))) = 'booking fee' then 'booking_fee'
+      else 'lain'
+    end
+where btrim(tipe) = 'Pemasukan kos'
+  and (
+    pemasukan_scope is null
+    or btrim(coalesce(pemasukan_scope, '')) = ''
+    or pemasukan_kind is null
+    or pemasukan_kind not in ('sewa_kamar', 'booking_fee')
+  );
+
+-- Kind "lain" tidak boleh untuk tipe Pemasukan kos pada CHECK final.
+update public.finance_kategori
+set tipe = 'Pemasukan manajemen',
+    pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain'
+where btrim(tipe) = 'Pemasukan kos'
+  and coalesce(pemasukan_kind, '') = 'lain';
+
+update public.finance_kategori
+set pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain'
+where btrim(tipe) = 'Pemasukan manajemen'
+  and (
+    pemasukan_scope is null
+    or btrim(coalesce(pemasukan_scope, '')) = ''
+    or pemasukan_kind is null
+  );
+
+update public.finance_kategori
+set pengeluaran_scope = case
+  when btrim(tipe) = 'Pengeluaran manajemen' then 'manajemen'
+  else 'kos'
+end
+where lower(btrim(tipe)) like 'pengeluaran%'
+  and (
+    pengeluaran_scope is null
+    or btrim(coalesce(pengeluaran_scope, '')) = ''
+  );
+
+alter table public.finance
+  add column if not exists pemasukan_scope text;
+
+alter table public.finance
+  add column if not exists pemasukan_kind text;
+
+update public.finance f
+set pemasukan_scope = k.pemasukan_scope,
+    pemasukan_kind = k.pemasukan_kind
+from public.finance_kategori k
+where f.kategori = 'Pemasukan'
+  and trim(f.pos) <> ''
+  and trim(k.nama_pos) <> ''
+  and lower(trim(f.pos)) = lower(trim(k.nama_pos))
+  and (f.pemasukan_scope is null or trim(f.pemasukan_scope) = '');
+
+update public.finance
+set pemasukan_scope = 'manajemen',
+    pemasukan_kind = 'lain'
+where kategori = 'Pemasukan'
+  and (pemasukan_scope is null or trim(pemasukan_scope) = '');
+
+update public.finance
+set pemasukan_scope = null,
+    pemasukan_kind = null
+where kategori = 'Pengeluaran';
+
+alter table public.finance_kategori
+  drop constraint if exists finance_kategori_tipe_check;
+
+alter table public.finance_kategori
+  add constraint finance_kategori_tipe_check
+  check (
+    btrim(tipe) in ('Pemasukan kos', 'Pemasukan manajemen', 'Pengeluaran kos', 'Pengeluaran manajemen')
+  );
+
+alter table public.finance_kategori
+  drop constraint if exists finance_kategori_pemasukan_scope_kind_check;
+
+alter table public.finance_kategori
+  add constraint finance_kategori_pemasukan_scope_kind_check
+  check (
+    (lower(btrim(tipe)) like 'pengeluaran%' and pemasukan_scope is null and pemasukan_kind is null)
+    or (
+      btrim(tipe) = 'Pemasukan kos'
+      and pemasukan_scope = 'kos'
+      and pemasukan_kind in ('sewa_kamar', 'booking_fee')
+    )
+    or (
+      btrim(tipe) = 'Pemasukan manajemen'
+      and pemasukan_scope = 'manajemen'
+      and pemasukan_kind = 'lain'
+    )
+  );
+
+alter table public.finance_kategori
+  drop constraint if exists finance_kategori_pengeluaran_scope_check;
+
+alter table public.finance_kategori
+  add constraint finance_kategori_pengeluaran_scope_check
+  check (
+    (btrim(tipe) in ('Pemasukan kos', 'Pemasukan manajemen') and pengeluaran_scope is null)
+    or (btrim(tipe) = 'Pengeluaran kos' and pengeluaran_scope = 'kos')
+    or (btrim(tipe) = 'Pengeluaran manajemen' and pengeluaran_scope = 'manajemen')
+  );
+
+alter table public.finance
+  drop constraint if exists finance_row_pemasukan_scope_kind_check;
+
+alter table public.finance
+  add constraint finance_row_pemasukan_scope_kind_check
+  check (
+    (kategori = 'Pengeluaran' and pemasukan_scope is null and pemasukan_kind is null)
+    or (
+      kategori = 'Pemasukan'
+      and pemasukan_scope in ('kos', 'manajemen')
+      and pemasukan_kind in ('sewa_kamar', 'booking_fee', 'lain')
+    )
+  );
+
+-- =========================
+-- password_change_log (audit password; tanpa menyimpan plaintext)
+-- =========================
+create table if not exists public.password_change_log (
+  id uuid primary key default gen_random_uuid(),
+  subject_user_id uuid not null,
+  actor_user_id uuid,
+  source text not null,
+  detail text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_password_change_log_created on public.password_change_log(created_at desc);
+create index if not exists idx_password_change_subject on public.password_change_log(subject_user_id);
 
 -- =========================
 -- Dev-only RLS policy template (optional)

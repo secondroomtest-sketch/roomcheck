@@ -8,8 +8,11 @@ import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
+import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
+import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY } from "@/lib/sandbox-storage";
+import { pageFieldWarmClass, pageHeroSectionClass, pageLabelWarmClass } from "@/lib/ui-page-layout";
 
 type ProfileForm = {
   fullName: string;
@@ -18,6 +21,8 @@ type ProfileForm = {
 };
 
 export default function ProfilePage() {
+  const sessionHydrated = useSupabaseSessionHydrated();
+  const cloudSyncTick = useCloudDataResyncTick();
   const { localDemoMode } = useSandboxMode();
   const { toast } = useAppFeedback();
   const router = useRouter();
@@ -55,6 +60,9 @@ export default function ProfilePage() {
         setUserId("");
         setInitialEmail(localOnly.email ?? "");
         setIsLoading(false);
+        return;
+      }
+      if (!sessionHydrated) {
         return;
       }
       setIsLoading(true);
@@ -101,7 +109,7 @@ export default function ProfilePage() {
     };
 
     void loadProfile();
-  }, [router, localDemoMode, sandboxRev]);
+  }, [router, localDemoMode, sandboxRev, sessionHydrated, cloudSyncTick]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -163,7 +171,7 @@ export default function ProfilePage() {
 
   return (
     <section className="mx-auto w-full max-w-2xl">
-      <article className="rounded-[2rem] border border-[#d6ddff] bg-white/90 p-6 shadow-[0_20px_55px_-35px_rgba(63,79,157,0.4)] dark:border-[#4f5b99] dark:bg-[#1a2144]/95">
+      <article className={pageHeroSectionClass}>
         <div className="mb-6">
           <p className="text-xs uppercase tracking-[0.28em] text-[#8b6d48] dark:text-[#cfb089]">
             Profile
@@ -184,29 +192,25 @@ export default function ProfilePage() {
         ) : (
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
-              <label className="mb-1 block text-xs uppercase tracking-[0.18em] text-[#8b6d48]">
-                Nama
-              </label>
+              <label className={pageLabelWarmClass}>Nama</label>
               <div className="relative">
-                <User size={14} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${iconTone.brand}`} />
+                <User size={14} className={`pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 ${iconTone.brand}`} />
               <input
                 required
                 value={form.fullName}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, fullName: event.target.value }))
                 }
-                className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-9 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
+                className={`${pageFieldWarmClass} pl-11`}
                 placeholder="Nama lengkap"
               />
               </div>
             </div>
 
             <div>
-              <label className="mb-1 block text-xs uppercase tracking-[0.18em] text-[#8b6d48]">
-                Email
-              </label>
+              <label className={pageLabelWarmClass}>Email</label>
               <div className="relative">
-                <Mail size={14} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${iconTone.brand}`} />
+                <Mail size={14} className={`pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 ${iconTone.brand}`} />
               <input
                 type="email"
                 required
@@ -214,22 +218,20 @@ export default function ProfilePage() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, email: event.target.value }))
                 }
-                className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-9 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
+                className={`${pageFieldWarmClass} pl-11`}
                 placeholder="email@domain.com"
               />
               </div>
             </div>
 
             <div>
-              <label className="mb-1 block text-xs uppercase tracking-[0.18em] text-[#8b6d48]">
-                No HP
-              </label>
+              <label className={pageLabelWarmClass}>No HP</label>
               <input
                 value={form.noHp}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, noHp: event.target.value }))
                 }
-                className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-4 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
+                className={pageFieldWarmClass}
                 placeholder="08xxxxxxxxxx"
               />
             </div>

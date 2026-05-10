@@ -2,6 +2,8 @@
  * Handoff lintas-tab: gunakan localStorage (bukan sessionStorage — tab baru tidak
  * mewarisi sessionStorage tab induk).
  */
+import type { PengeluaranScope } from "@/lib/pengeluaran-scope";
+
 export const LAPORAN_EXPORT_STORAGE_KEY = "secondroom_laporan_export_v1";
 
 export type ReportFinanceRow = {
@@ -13,6 +15,8 @@ export type ReportFinanceRow = {
   unitBlok: string;
   /** POS finance (untuk aturan revenue owner di ringkasan). */
   pos?: string;
+  /** Hanya Pengeluaran: kos vs manajemen (dari Master / kolom finance). */
+  pengeluaranScope?: PengeluaranScope | null;
 };
 
 export type ReportKamarRow = {
@@ -54,6 +58,8 @@ export type LaporanExportPayloadV1 = {
   /** Role profil saat ekspor (untuk revenue owner). */
   userProfileRole: string;
   localDemoMode: boolean;
+  /** Tab cetak: sorot struktur kos vs manajemen (opsional = tampilkan keduanya). */
+  laporanFokus?: "kos" | "manajemen";
   filters: {
     startDate: string;
     endDate: string;
@@ -66,8 +72,18 @@ export type LaporanExportPayloadV1 = {
     available: number;
     maintenance: number;
     occupancyPct: number;
-    /** Total nominal pemasukan (semua POS) dalam filter. */
+    /** Total nominal pemasukan (sewa kamar + margin), selaras halaman Finance. */
     pemasukanTotal: number;
+    /** Total nominal pemasukan kos (sewa kamar + booking fee). */
+    pemasukanKosTotal: number;
+    /** Total nominal pemasukan manajemen (selain sewa + booking fee). */
+    pemasukanManajemenTotal: number;
+    pengeluaranKosTotal: number;
+    pengeluaranManajemenTotal: number;
+    /** P&L kos: pemasukan kos − pengeluaran kos. */
+    plKosNominal: number;
+    /** P&L manajemen: pemasukan manajemen − pengeluaran manajemen. */
+    plManajemenNominal: number;
     /** Total pemasukan tampilan owner (deposit/booking tidak dijumlahkan). */
     revenueOwnerView: number;
     pengeluaranTotal: number;
@@ -79,8 +95,19 @@ export type LaporanExportPayloadV1 = {
     surveyTotalAll: number;
     pemasukanTransactionCount: number;
     pemasukanTransactionCountOwnerView: number;
+    pemasukanKosTransactionCount: number;
+    pemasukanManajemenTransactionCount: number;
+    pengeluaranKosTransactionCount: number;
+    pengeluaranManajemenTransactionCount: number;
+    pengeluaranTransactionCount: number;
   };
-  monthly: { month: string; pemasukan: number; pengeluaran: number }[];
+  monthly: {
+    month: string;
+    pemasukanKos: number;
+    pemasukanManajemen: number;
+    pengeluaranKos: number;
+    pengeluaranManajemen: number;
+  }[];
   kamarByStatus: { name: string; value: number }[];
   financeRows: ReportFinanceRow[];
   penghuniRows: LaporanPenghuniSnap[];

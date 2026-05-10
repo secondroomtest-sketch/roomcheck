@@ -5,14 +5,44 @@ import MasterPageClient, {
   LokasiRow,
   UserProfileRow,
 } from "@/components/master-page-client";
+import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 
 function mapFinanceKategori(row: Record<string, unknown>): FinanceKategoriRow {
+  const tipeRaw = String(row.tipe ?? "").trim().toLowerCase();
+  const scope = normalizePengeluaranScope(row.pengeluaran_scope);
+  const pos = String(row.nama_pos ?? row.pos ?? row.nama ?? "").trim().toLowerCase();
+  const posSewa = "sewa kamar";
+  const tipe: FinanceKategoriRow["tipe"] =
+    tipeRaw === "pemasukan manajemen"
+      ? "Pemasukan manajemen"
+      : tipeRaw === "pemasukan kos"
+        ? "Pemasukan kos"
+          : tipeRaw === "pemasukan"
+            ? pos === posSewa
+              ? "Pemasukan kos"
+              : pos === "booking fee"
+                ? "Pemasukan kos"
+                : "Pemasukan manajemen"
+            : tipeRaw === "pengeluaran manajemen"
+        ? "Pengeluaran manajemen"
+        : tipeRaw === "pengeluaran kos"
+          ? "Pengeluaran kos"
+          : tipeRaw === "pengeluaran"
+            ? scope === "manajemen"
+              ? "Pengeluaran manajemen"
+              : "Pengeluaran kos"
+            : tipeRaw.startsWith("pengeluaran")
+              ? "Pengeluaran kos"
+              : tipeRaw.startsWith("pemasukan")
+                ? "Pemasukan manajemen"
+                : "Pemasukan manajemen";
   return {
     id: String(row.id ?? ""),
-    tipe:
-      String(row.tipe ?? "").toLowerCase() === "pengeluaran" ? "Pengeluaran" : "Pemasukan",
+    tipe,
     namaPos:
       String(row.nama_pos ?? "") || String(row.pos ?? "") || String(row.nama ?? "") || "-",
+    pengeluaranScope:
+      tipe.startsWith("Pengeluaran") ? normalizePengeluaranScope(row.pengeluaran_scope) : undefined,
   };
 }
 
@@ -44,6 +74,8 @@ function mapUser(row: Record<string, unknown>): UserProfileRow {
       String(row.name ?? "") ||
       "Unknown User",
     email: String(row.email ?? "-"),
+    username:
+      typeof row.username === "string" && row.username.trim() ? String(row.username).trim() : undefined,
     noHp: String(row.no_hp ?? "") || String(row.noHp ?? "") || "",
     role: role as UserProfileRow["role"],
     aksesLokasi: Array.isArray(row.akses_lokasi)

@@ -6,10 +6,23 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/libsupabaseClient";
 import { iconTone } from "@/lib/ui-accent";
-import { BarChart3, BedDouble, Building2, ClipboardList, HandCoins, House, Menu, X } from "lucide-react";
+import {
+  BarChart3,
+  BedDouble,
+  Building2,
+  ClipboardList,
+  HandCoins,
+  House,
+  Menu,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { SandboxModeProvider, useSandboxMode } from "@/components/sandbox-mode-provider";
-import { AppFeedbackProvider } from "@/components/app-feedback-provider";
+import { AppFeedbackProvider, useAppFeedback } from "@/components/app-feedback-provider";
 import { readDemoProfileSession, writeDemoProfileSession } from "@/lib/demo-auth";
+import { normalizeUserProfileRole } from "@/lib/user-profile-role";
+import { SupabaseSessionHydratedProvider, useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
+import { emitCloudDataResync } from "@/lib/cloud-resync";
 
 type ThemeMode = "light" | "dark";
 
@@ -36,6 +49,8 @@ function DashboardShellInner({
 }: {
   children: React.ReactNode;
 }) {
+  const sessionHydrated = useSupabaseSessionHydrated();
+  const { toast } = useAppFeedback();
   const { localDemoMode } = useSandboxMode();
   const router = useRouter();
   const pathname = usePathname();
@@ -53,10 +68,11 @@ function DashboardShellInner({
   const [now, setNow] = useState<Date | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [hardRefreshLoading, setHardRefreshLoading] = useState(false);
   const [profileName, setProfileName] = useState("User");
   const [profileRole, setProfileRole] = useState("staff");
   const navItemsScoped = useMemo(() => {
-    const role = String(profileRole ?? "").trim().toLowerCase();
+    const role = normalizeUserProfileRole(profileRole);
     if (role === "owner") return navItems.filter((n) => n.href === "/dashboard");
     if (role !== "super_admin" && role !== "manager") return navItems.filter((n) => n.href !== "/master");
     return navItems;
@@ -71,11 +87,12 @@ function DashboardShellInner({
 
   useEffect(() => {
     const loadProfile = async () => {
+      if (!sessionHydrated) return;
       if (localDemoMode) {
         const demo = readDemoProfileSession();
         if (demo) {
           setProfileName(demo.nama || demo.email || "User");
-          setProfileRole(demo.role || "staff");
+          setProfileRole(normalizeUserProfileRole(demo.role));
         } else {
           setProfileName("User");
           setProfileRole("staff");
@@ -98,16 +115,18 @@ function DashboardShellInner({
 
       const record = data as Record<string, unknown> | null;
       const fullName = String(record?.full_name ?? "").trim();
-      const role = String(record?.role ?? "").trim();
-
       setProfileName(fullName || user.email || "User");
-      setProfileRole(role || "staff");
+      setProfileRole(normalizeUserProfileRole(record?.role));
     };
 
     void loadProfile();
-  }, [localDemoMode]);
+  }, [localDemoMode, sessionHydrated]);
 
   const isDark = theme === "dark";
+
+  const isOwnerDashboard =
+    pathname === "/dashboard" &&
+    normalizeUserProfileRole(profileRole) === "owner";
 
   const wrapperThemeClass = useMemo(
     () =>
@@ -141,14 +160,14 @@ function DashboardShellInner({
 
   /** Setelah semua hook: tab laporan cetak tanpa chrome (print). */
   if (pathname === "/laporan/cetak") {
-    return <div className="min-h-screen bg-[#f5f6ff] text-[#1f1b42]">{children}</div>;
+    return <div className="safe-cetak-wrap bg-[#f5f6ff] text-[#1f1b42]">{children}</div>;
   }
 
   return (
     <div className={`brand-theme min-h-screen ${wrapperThemeClass} ${isDark ? "dark" : ""}`}>
       <div className="flex min-h-screen">
         <aside
-          className={`relative hidden w-72 border-r p-6 lg:flex lg:flex-col ${
+          className={`relative hidden w-72 border-r safe-aside-lg lg:flex lg:flex-col ${
             isDark
               ? "border-[#2d315a] bg-[#16183a]"
               : "border-[#d8defc] bg-[#eef2ff]"
@@ -224,7 +243,7 @@ function DashboardShellInner({
               onClick={() => setMobileNavOpen(false)}
             />
             <aside
-              className={`relative z-10 h-full w-[18rem] border-r p-5 ${
+              className={`relative z-10 h-full w-[18rem] border-r safe-drawer-panel ${
                 isDark ? "border-[#2d315a] bg-[#16183a]" : "border-[#d8defc] bg-[#eef2ff]"
               }`}
             >
@@ -287,12 +306,42 @@ function DashboardShellInner({
           </div>
         ) : null}
 
-        <div className="flex min-h-screen flex-1 flex-col">
+        <div
+          className={`flex min-h-screen flex-1 flex-col ${
+            isOwnerDashboard ? "relative isolate overflow-hidden" : ""
+          }`}
+        >
+          {isOwnerDashboard ? (
+            <>
+              <div
+                className={`pointer-events-none absolute inset-0 -z-10 ${
+                  isDark ? "bg-[#14182e]" : "bg-gradient-to-br from-[#e8ebff] via-[#ebe4ff] to-[#dfe8ff]"
+                }`}
+                aria-hidden
+              />
+              <div
+                className={`pointer-events-none absolute inset-0 -z-10 ${
+                  isDark
+                    ? "bg-[radial-gradient(circle_at_18%_0%,rgba(109,50,255,0.32),transparent_46%),radial-gradient(circle_at_92%_18%,rgba(77,109,255,0.28),transparent_52%),radial-gradient(circle_at_72%_88%,rgba(124,58,237,0.22),transparent_46%)]"
+                    : "bg-[radial-gradient(circle_at_12%_0%,rgba(109,50,255,0.22),transparent_44%),radial-gradient(circle_at_90%_10%,rgba(77,109,255,0.2),transparent_50%),radial-gradient(circle_at_70%_92%,rgba(109,40,217,0.16),transparent_42%)]"
+                }`}
+                aria-hidden
+              />
+              <div
+                className={`pointer-events-none absolute inset-0 -z-10 opacity-90 [background:linear-gradient(155deg,${
+                  isDark
+                    ? "rgba(22,26,52,0.85)_0%,rgba(109,50,255,0.22)_42%,rgba(77,109,255,0.2)_100%"
+                    : "rgba(255,255,255,0.5)_0%,rgba(237,229,255,0.72)_42%,rgba(222,235,255,0.82)_100%"
+                })]`}
+                aria-hidden
+              />
+            </>
+          ) : null}
           {!mobileNavOpen ? (
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
-              className={`fixed bottom-4 left-4 z-[85] inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-lg lg:hidden ${
+              className={`safe-fab-bl fixed z-[85] inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-lg lg:hidden ${
                 isDark
                   ? "border-[#4b5894] bg-[#202a52] text-[#d6e0ff]"
                   : "border-[#c6d2ff] bg-white text-[#4457a8]"
@@ -304,10 +353,14 @@ function DashboardShellInner({
             </button>
           ) : null}
           <header
-            className={`sticky top-0 z-20 flex items-center justify-between border-b px-5 py-4 backdrop-blur sm:px-8 ${
-              isDark
-                ? "border-[#2d315a] bg-[#141831]/85"
-                : "border-[#d8defc] bg-[#f5f6ff]/85"
+            className={`safe-pt-header safe-x-md sticky top-0 z-20 flex items-center justify-between border-b backdrop-blur pb-4 ${
+              isOwnerDashboard
+                ? isDark
+                  ? "border-[#3f3b72]/55 bg-[#181c36]/72"
+                  : "border-[#c9c2ff]/45 bg-[#f7f6ff]/55"
+                : isDark
+                  ? "border-[#2d315a] bg-[#141831]/85"
+                  : "border-[#d8defc] bg-[#f5f6ff]/85"
             }`}
           >
             <div>
@@ -336,15 +389,45 @@ function DashboardShellInner({
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-              <span
-                className={`hidden items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline-flex sm:text-[11px] ${
-                  isDark
-                    ? "border-[#3e477c] bg-[#1f2546] text-[#b8c6ff]"
-                    : "border-[#d3dbff] bg-[#f8f9ff] text-[#4a5ba4]"
-                }`}
-              >
-                Cloud Mode: Supabase
-              </span>
+              {!localDemoMode ? (
+                <button
+                  type="button"
+                  disabled={hardRefreshLoading}
+                  title="Hard refresh — muat ulang sesi dan data dari server"
+                  onClick={() => {
+                    void (async () => {
+                      setHardRefreshLoading(true);
+                      try {
+                        try {
+                          await supabase.auth.refreshSession();
+                        } catch {
+                          /* biarkan pengguna tetap coba kirim event resync */
+                        }
+                        emitCloudDataResync();
+                        await new Promise((resolve) => {
+                          window.setTimeout(resolve, 700);
+                        });
+                        toast("Refresh sukses", "success", "top");
+                      } finally {
+                        setHardRefreshLoading(false);
+                      }
+                    })();
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] transition sm:text-[11px] disabled:pointer-events-none disabled:opacity-60 ${
+                    isDark
+                      ? "border-[#5560a8] bg-[#232c58] text-[#d8e0ff] hover:bg-[#2c3770]"
+                      : "border-[#b8c4ff] bg-white text-[#4a54a8] hover:bg-[#eef1ff]"
+                  }`}
+                >
+                  <RefreshCw
+                    size={13}
+                    strokeWidth={2.25}
+                    className={`shrink-0 opacity-95 ${hardRefreshLoading ? "animate-spin" : ""}`}
+                    aria-hidden
+                  />
+                  HARD REFRESH
+                </button>
+              ) : null}
               <p className="hidden bg-gradient-to-r from-[#4d6dff] via-[#6d32ff] to-[#15c57a] bg-clip-text text-[10px] font-extrabold uppercase tracking-[0.22em] text-transparent md:block md:text-[11px]">
                 SECOND ROOM KOST MANAGEMENT
               </p>
@@ -404,14 +487,32 @@ function DashboardShellInner({
             </div>
           </header>
 
-          <main className="flex-1 px-5 py-6 sm:px-8">{children}</main>
-          <footer className="px-5 pb-4 sm:px-8">
+          <main className="safe-x-md min-w-0 flex-1 py-5 sm:py-6">{children}</main>
+          <footer className={`safe-x-md safe-pb-footer ${isOwnerDashboard ? "relative" : ""}`}>
             <p className="text-right text-[11px] font-medium tracking-[0.12em] text-[#5d6fc0] dark:text-[#aebcff]">
               Version {appVersion}
             </p>
           </footer>
         </div>
       </div>
+
+      {hardRefreshLoading ? (
+        <div
+          className="fixed inset-0 z-[388] flex flex-col items-center justify-center bg-[#0f1020]/40 backdrop-blur-[2px] dark:bg-black/50"
+          role="status"
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Memuat ulang data aplikasi"
+        >
+          <div className="flex flex-col items-center rounded-3xl border border-white/25 bg-white/90 px-8 py-7 shadow-xl dark:border-white/10 dark:bg-[#1c1f3a]/90">
+            <div
+              className="h-12 w-12 animate-spin rounded-full border-[3px] border-[#4d6dff]/35 border-t-[#6d32ff]"
+              aria-hidden
+            />
+            <p className="mt-4 text-sm font-semibold text-[#1f1b42] dark:text-[#eef3ff]">Memuat ulang…</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -424,7 +525,9 @@ export default function DashboardShell({
   return (
     <SandboxModeProvider>
       <AppFeedbackProvider>
-        <DashboardShellInner>{children}</DashboardShellInner>
+        <SupabaseSessionHydratedProvider>
+          <DashboardShellInner>{children}</DashboardShellInner>
+        </SupabaseSessionHydratedProvider>
       </AppFeedbackProvider>
     </SandboxModeProvider>
   );

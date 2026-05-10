@@ -8,7 +8,14 @@ import {
   Bell,
   Building2,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
+  LayoutGrid,
+  PieChart,
+  Receipt,
+  TrendingUp,
+  Users,
+  Wrench,
 } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
@@ -19,8 +26,18 @@ import { readSandboxJson, SB_KEY } from "@/lib/sandbox-storage";
 import { readDemoProfileSession } from "@/lib/demo-auth";
 import { buildDemoLokasiList, buildDemoUnitList, type SandboxMasterSnapshot } from "@/lib/demo-form-options";
 import { supabase } from "@/libsupabaseClient";
+import { normalizeUserProfileRole } from "@/lib/user-profile-role";
+import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
+import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
 import { calendarDaysUntilCheckout } from "@/lib/checkout-dates";
 import { isExcludedFromOwnerDashboardRevenue } from "@/lib/finance-dashboard-revenue";
+import { pelaporanBulanIsoFromDbRecord } from "@/lib/finance-pelaporan-bulan-from-db";
+import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
+import {
+  computeLaporanFinanceBreakdown,
+  financeUiRowsToReportRows,
+  isManajemenPlFinanceUiRow,
+} from "@/lib/laporan-finance-breakdown";
 import { defaultPnlCalendarYm, financeRowCalendarYm } from "@/lib/finance-pnl-month";
 import { syncKamarRowsWithPenghuniList } from "@/lib/kamar-penghuni-sync";
 import type { PenghuniRow, SurveyCalonRow } from "@/components/penghuni-page-client";
@@ -149,12 +166,6 @@ function formatBookingFeeDisplay(raw: string): string {
   return `Rp ${Number(digits).toLocaleString("id-ID")}`;
 }
 
-function toYmFromYmd(raw: string): string {
-  const v = String(raw ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return "";
-  return v.slice(0, 7);
-}
-
 function buildLokasiFilterOptions(
   localDemo: boolean,
   kamar: KamarRow[],
@@ -169,6 +180,18 @@ function buildLokasiFilterOptions(
   return buildDemoLokasiList(sandboxReady, kamar, merged);
 }
 
+/** Geser string YYYY-MM sejumlah bulan (untuk tombol cepat Owner). */
+function addCalendarMonthsYm(ym: string, deltaMonths: number): string {
+  const parts = String(ym ?? "").trim().split("-");
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) {
+    return defaultPnlCalendarYm();
+  }
+  const d = new Date(Date.UTC(y, m - 1 + deltaMonths, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 const PENGHUNI_LIST_FILTER_OPTIONS = [
   { value: "semua", label: "SEMUA PENGHUNI" },
   { value: "hampir7", label: "CHECK OUT H-1 S/D H-7" },
@@ -179,7 +202,89 @@ const PENGHUNI_LIST_FILTER_OPTIONS = [
 
 type PenghuniListFilter = (typeof PENGHUNI_LIST_FILTER_OPTIONS)[number]["value"];
 
+type OwnerDashboardMenuId = "ringkasan" | "penghuni" | "pl" | "finance";
+
+const OWNER_DASHBOARD_MENU: {
+  id: OwnerDashboardMenuId;
+  title: string;
+  description: string;
+  Icon: typeof LayoutGrid;
+  cardIdle: string;
+  cardSelected: string;
+  iconIdle: string;
+  iconSelected: string;
+  focusRing: string;
+  descClass: string;
+}[] = [
+  {
+    id: "ringkasan",
+    title: "Ringkasan Metrik",
+    description: "Okupansi, revenue, dan ringkasan status kamar.",
+    Icon: LayoutGrid,
+    cardIdle:
+      "border-amber-200/85 bg-gradient-to-br from-[#fffbf5] via-white to-[#fff0db] shadow-[0_12px_32px_-10px_rgba(251,191,36,0.28),0_4px_16px_-6px_rgba(30,41,59,0.1),inset_0_1px_0_0_rgba(255,255,255,0.85)] dark:border-amber-900/40 dark:from-[#2a2218] dark:via-[#1a1510] dark:to-[#261c0f] dark:shadow-[0_14px_40px_-10px_rgba(0,0,0,0.58),0_6px_20px_-10px_rgba(251,146,60,0.16),inset_0_1px_0_0_rgba(255,255,255,0.07)]",
+    cardSelected:
+      "border-amber-400/90 bg-gradient-to-br from-amber-100/95 to-[#ffe4c7] shadow-[0_20px_52px_-12px_rgba(251,191,36,0.42),0_10px_28px_-10px_rgba(30,41,59,0.15),inset_0_1px_0_0_rgba(255,255,255,0.92)] ring-2 ring-amber-400/50 dark:border-amber-600/75 dark:from-[#3f3018] dark:to-[#36260f] dark:shadow-[0_22px_56px_-12px_rgba(0,0,0,0.72),0_10px_32px_-12px_rgba(251,146,60,0.24),inset_0_1px_0_0_rgba(255,255,255,0.09)] dark:ring-amber-500/40",
+    iconIdle:
+      "border-amber-300/75 bg-amber-50 text-amber-900 shadow-[0_5px_14px_-6px_rgba(245,158,11,0.35),inset_0_1px_0_0_rgba(255,255,255,0.72)] dark:border-amber-700/50 dark:bg-[#3d2e18] dark:text-amber-100 dark:shadow-[0_6px_16px_-6px_rgba(0,0,0,0.45),inset_0_1px_0_0_rgba(255,255,255,0.08)]",
+    iconSelected:
+      "border-amber-500/80 bg-white text-amber-950 shadow-[0_6px_18px_-6px_rgba(245,158,11,0.45),inset_0_1px_0_0_rgba(255,255,255,0.95)] dark:border-amber-500 dark:bg-amber-950/65 dark:text-amber-50 dark:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.1)]",
+    focusRing: "focus-visible:ring-amber-400/70",
+    descClass: "text-amber-950/75 dark:text-amber-100/75",
+  },
+  {
+    id: "penghuni",
+    title: "Daftar Penghuni",
+    description: "Data penghuni, peringatan checkout, dan calon survey.",
+    Icon: Users,
+    cardIdle:
+      "border-violet-200/85 bg-gradient-to-br from-violet-50/95 via-white to-[#f5f0ff] shadow-[0_12px_32px_-10px_rgba(167,139,250,0.28),0_4px_16px_-6px_rgba(30,41,59,0.1),inset_0_1px_0_0_rgba(255,255,255,0.85)] dark:border-violet-800/45 dark:from-[#251a32] dark:via-[#16121e] dark:to-[#201830] dark:shadow-[0_14px_40px_-10px_rgba(0,0,0,0.58),0_6px_20px_-10px_rgba(167,139,250,0.18),inset_0_1px_0_0_rgba(255,255,255,0.07)]",
+    cardSelected:
+      "border-violet-400/85 bg-gradient-to-br from-violet-100/95 to-[#e9ddfd] shadow-[0_20px_52px_-12px_rgba(167,139,250,0.4),0_10px_28px_-10px_rgba(30,41,59,0.15),inset_0_1px_0_0_rgba(255,255,255,0.92)] ring-2 ring-violet-400/45 dark:border-violet-500/70 dark:from-[#3d2d55] dark:to-[#322448] dark:shadow-[0_22px_56px_-12px_rgba(0,0,0,0.72),0_10px_32px_-12px_rgba(167,139,250,0.26),inset_0_1px_0_0_rgba(255,255,255,0.09)] dark:ring-violet-500/40",
+    iconIdle:
+      "border-violet-300/75 bg-violet-50 text-violet-900 shadow-[0_5px_14px_-6px_rgba(139,92,246,0.35),inset_0_1px_0_0_rgba(255,255,255,0.72)] dark:border-violet-700/45 dark:bg-[#3a2a4d] dark:text-violet-100 dark:shadow-[0_6px_16px_-6px_rgba(0,0,0,0.45),inset_0_1px_0_0_rgba(255,255,255,0.08)]",
+    iconSelected:
+      "border-violet-500/80 bg-white text-violet-950 shadow-[0_6px_18px_-6px_rgba(139,92,246,0.42),inset_0_1px_0_0_rgba(255,255,255,0.95)] dark:border-violet-400 dark:bg-violet-950/55 dark:text-violet-50 dark:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.1)]",
+    focusRing: "focus-visible:ring-violet-400/65",
+    descClass: "text-violet-950/78 dark:text-violet-100/78",
+  },
+  {
+    id: "pl",
+    title: "Laporan P&L Bulanan",
+    description: "Ringkasan laba rugi kos sesuai bulan P&L yang dipilih.",
+    Icon: PieChart,
+    cardIdle:
+      "border-emerald-200/85 bg-gradient-to-br from-emerald-50/95 via-white to-[#e8fcf2] shadow-[0_12px_32px_-10px_rgba(52,211,153,0.28),0_4px_16px_-6px_rgba(30,41,59,0.1),inset_0_1px_0_0_rgba(255,255,255,0.85)] dark:border-emerald-800/45 dark:from-[#13241c] dark:via-[#101814] dark:to-[#12261a] dark:shadow-[0_14px_40px_-10px_rgba(0,0,0,0.58),0_6px_20px_-10px_rgba(52,211,153,0.16),inset_0_1px_0_0_rgba(255,255,255,0.07)]",
+    cardSelected:
+      "border-emerald-400/85 bg-gradient-to-br from-emerald-100/95 to-[#c8f7e4] shadow-[0_20px_52px_-12px_rgba(52,211,153,0.4),0_10px_28px_-10px_rgba(30,41,59,0.15),inset_0_1px_0_0_rgba(255,255,255,0.92)] ring-2 ring-emerald-400/45 dark:border-emerald-500/65 dark:from-[#1a4030] dark:to-[#153528] dark:shadow-[0_22px_56px_-12px_rgba(0,0,0,0.72),0_10px_32px_-12px_rgba(52,211,153,0.24),inset_0_1px_0_0_rgba(255,255,255,0.09)] dark:ring-emerald-500/38",
+    iconIdle:
+      "border-emerald-300/75 bg-emerald-50 text-emerald-900 shadow-[0_5px_14px_-6px_rgba(16,185,129,0.35),inset_0_1px_0_0_rgba(255,255,255,0.72)] dark:border-emerald-700/45 dark:bg-[#1a3528] dark:text-emerald-100 dark:shadow-[0_6px_16px_-6px_rgba(0,0,0,0.45),inset_0_1px_0_0_rgba(255,255,255,0.08)]",
+    iconSelected:
+      "border-emerald-500/75 bg-white text-emerald-950 shadow-[0_6px_18px_-6px_rgba(16,185,129,0.42),inset_0_1px_0_0_rgba(255,255,255,0.95)] dark:border-emerald-500 dark:bg-emerald-950/55 dark:text-emerald-50 dark:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.1)]",
+    focusRing: "focus-visible:ring-emerald-400/65",
+    descClass: "text-emerald-950/78 dark:text-emerald-100/76",
+  },
+  {
+    id: "finance",
+    title: "Detail Finance",
+    description: "Tabel pengeluaran dan pemasukan terfilter.",
+    Icon: Receipt,
+    cardIdle:
+      "border-sky-200/85 bg-gradient-to-br from-sky-50/95 via-white to-[#e0f4ff] shadow-[0_12px_32px_-10px_rgba(56,189,248,0.28),0_4px_16px_-6px_rgba(30,41,59,0.1),inset_0_1px_0_0_rgba(255,255,255,0.85)] dark:border-sky-800/45 dark:from-[#14252e] dark:via-[#121a22] dark:to-[#152830] dark:shadow-[0_14px_40px_-10px_rgba(0,0,0,0.58),0_6px_20px_-10px_rgba(56,189,248,0.18),inset_0_1px_0_0_rgba(255,255,255,0.07)]",
+    cardSelected:
+      "border-sky-400/85 bg-gradient-to-br from-sky-100/95 to-[#bae6fd] shadow-[0_20px_52px_-12px_rgba(56,189,248,0.4),0_10px_28px_-10px_rgba(30,41,59,0.15),inset_0_1px_0_0_rgba(255,255,255,0.92)] ring-2 ring-sky-400/45 dark:border-sky-500/65 dark:from-[#1e3f52] dark:to-[#1a3648] dark:shadow-[0_22px_56px_-12px_rgba(0,0,0,0.72),0_10px_32px_-12px_rgba(56,189,248,0.26),inset_0_1px_0_0_rgba(255,255,255,0.09)] dark:ring-sky-500/38",
+    iconIdle:
+      "border-sky-300/75 bg-sky-50 text-sky-950 shadow-[0_5px_14px_-6px_rgba(14,165,233,0.35),inset_0_1px_0_0_rgba(255,255,255,0.72)] dark:border-sky-700/45 dark:bg-[#1a3545] dark:text-sky-100 dark:shadow-[0_6px_16px_-6px_rgba(0,0,0,0.45),inset_0_1px_0_0_rgba(255,255,255,0.08)]",
+    iconSelected:
+      "border-sky-500/75 bg-white text-sky-950 shadow-[0_6px_18px_-6px_rgba(14,165,233,0.42),inset_0_1px_0_0_rgba(255,255,255,0.95)] dark:border-sky-500 dark:bg-sky-950/50 dark:text-sky-50 dark:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.1)]",
+    focusRing: "focus-visible:ring-sky-400/65",
+    descClass: "text-sky-950/80 dark:text-sky-100/78",
+  },
+];
+
 export default function DashboardPage() {
+  const sessionHydrated = useSupabaseSessionHydrated();
+  const cloudSyncTick = useCloudDataResyncTick();
   const { localDemoMode } = useSandboxMode();
   const { toast } = useAppFeedback();
   const [sandboxRev, setSandboxRev] = useState(0);
@@ -235,19 +340,29 @@ export default function DashboardPage() {
 
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [profileRole, setProfileRole] = useState("staff");
-  /** Owner: agregasi pemasukan/P&amp;L mengikuti bulan kalender (bukan seluruh riwayat). */
+  /** Owner: agregasi &amp; tabel pemasukan/pengeluaran/P&amp;L mengikuti bulan kalender. Data operasional (penghuni/kamar/survey) hanya lokasi/unit. */
   const [ownerPnlMonth, setOwnerPnlMonth] = useState(defaultPnlCalendarYm);
+  const [ownerPlSectionOpen, setOwnerPlSectionOpen] = useState(true);
+  /** Owner: konten blok dashboard hanya ditampilkan setelah salah satu kartu Menu dipilih. */
+  const [ownerMenuPanel, setOwnerMenuPanel] = useState<OwnerDashboardMenuId | null>(null);
   const [aksesLokasiIds, setAksesLokasiIds] = useState<string[]>([]);
   const [aksesBlokIds, setAksesBlokIds] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [cloudLokasi, setCloudLokasi] = useState<{ id: string; nama: string }[]>([]);
   const [cloudBlok, setCloudBlok] = useState<{ id: string; lokasiId: string; nama: string }[]>([]);
+  const [cloudDataError, setCloudDataError] = useState("");
+  const masterRowCountsRef = useRef({ lokasi: 0, blok: 0 });
+  const warnedEmptyOperationalRef = useRef(false);
+
+  useEffect(() => {
+    warnedEmptyOperationalRef.current = false;
+  }, [cloudSyncTick]);
 
   useEffect(() => {
     if (localDemoMode) {
       const demo = readDemoProfileSession();
       setSessionUserId(demo?.id ?? null);
-      setProfileRole(demo?.role ?? "staff");
+      setProfileRole(normalizeUserProfileRole(demo?.role));
       setAksesLokasiIds(demo?.aksesLokasi ?? []);
       setAksesBlokIds(demo?.aksesBlok ?? []);
       setProfileLoaded(true);
@@ -255,6 +370,7 @@ export default function DashboardPage() {
     }
     let cancelled = false;
     const loadProfile = async () => {
+      if (!sessionHydrated) return;
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -268,16 +384,34 @@ export default function DashboardPage() {
         return;
       }
       setSessionUserId(user.id);
-      const { data } = await supabase
+      const { data: profileRows, error: profileErr } = await supabase
         .from("user_profiles")
         .select("role, akses_lokasi, akses_blok")
-        .eq("id", user.id)
-        .maybeSingle();
+        .eq("id", user.id);
       if (cancelled) return;
-      const rec = data as Record<string, unknown> | null;
-      setProfileRole(String(rec?.role ?? "staff").trim() || "staff");
-      const al = rec?.akses_lokasi;
-      const ab = rec?.akses_blok;
+      if (profileErr) {
+        toast(`Gagal memuat role/akses profil (${profileErr.message}).`, "error");
+        setProfileRole("staff");
+        setAksesLokasiIds([]);
+        setAksesBlokIds([]);
+        setProfileLoaded(true);
+        return;
+      }
+      const rec = profileRows?.[0] as Record<string, unknown> | undefined;
+      if (!rec) {
+        toast(
+          "Akun Anda tidak punya baris di tabel user_profiles — data operasional tidak bisa tampil. Super Admin dapat membuat profil di Master atau lewat onboarding SQL.",
+          "error",
+        );
+        setProfileRole("staff");
+        setAksesLokasiIds([]);
+        setAksesBlokIds([]);
+        setProfileLoaded(true);
+        return;
+      }
+      setProfileRole(normalizeUserProfileRole(rec.role));
+      const al = rec.akses_lokasi;
+      const ab = rec.akses_blok;
       setAksesLokasiIds(Array.isArray(al) ? al.map((x) => String(x)) : []);
       setAksesBlokIds(Array.isArray(ab) ? ab.map((x) => String(x)) : []);
       setProfileLoaded(true);
@@ -286,7 +420,14 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [localDemoMode]);
+  }, [localDemoMode, sessionHydrated, cloudSyncTick]);
+
+  /** Sementara profile dimuat + session ada: perlakukan seperti scoped penuh agar tidak memakai filter staff + akses kosong (kartu kosong). Staff bisa melihat semua lokasi sangat singkat (~1 request). */
+  const globalLokasiBlokScope = useMemo(() => {
+    if (localDemoMode && !sessionUserId) return true;
+    if (!localDemoMode && sessionUserId && !profileLoaded) return true;
+    return canSelectAllLokasiDanBlok(profileRole);
+  }, [localDemoMode, sessionUserId, profileRole, profileLoaded]);
 
   useEffect(() => {
     if (localDemoMode) {
@@ -296,10 +437,11 @@ export default function DashboardPage() {
     }
     let cancelled = false;
     const loadMaster = async () => {
+      if (!sessionHydrated) return;
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
         if (!cancelled) {
           setCloudLokasi([]);
           setCloudBlok([]);
@@ -311,6 +453,14 @@ export default function DashboardPage() {
         supabase.from("master_blok").select("id, lokasi_id, nama_blok").order("nama_blok", { ascending: true }),
       ]);
       if (cancelled) return;
+      masterRowCountsRef.current = {
+        lokasi: (lokRes.data ?? []).length,
+        blok: (blokRes.data ?? []).length,
+      };
+      const masterErr = lokRes.error?.message ?? blokRes.error?.message ?? "";
+      if (masterErr) {
+        toast(`Master lokasi/blok gagal dimuat (${masterErr}). Periksa RLS atau login.`, "error");
+      }
       setCloudLokasi(
         (lokRes.data ?? [])
           .map((r) => ({
@@ -333,7 +483,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [localDemoMode]);
+  }, [localDemoMode, sessionHydrated, cloudSyncTick]);
 
   useEffect(() => {
     if (localDemoMode) {
@@ -344,21 +494,25 @@ export default function DashboardPage() {
       return;
     }
     let cancelled = false;
-    const mapFinance = (row: Record<string, unknown>): FinanceRow => ({
+    const mapFinance = (row: Record<string, unknown>): FinanceRow => {
+      const kat = String(row.kategori ?? "").toLowerCase() === "pengeluaran" ? "Pengeluaran" : "Pemasukan";
+      return {
       id: String(row.id ?? ""),
       noNota: String(row.no_nota ?? ""),
-      kategori: String(row.kategori ?? "").toLowerCase() === "pengeluaran" ? "Pengeluaran" : "Pemasukan",
+      kategori: kat,
       pos: String(row.pos ?? ""),
+      pengeluaranScope: kat === "Pengeluaran" ? normalizePengeluaranScope(row.pengeluaran_scope) : null,
       tanggal: String(row.tanggal ?? ""),
       namaPenghuni: String(row.nama_penghuni ?? ""),
       lokasiKos: String(row.lokasi_kos ?? ""),
       unitBlok: String(row.unit_blok ?? ""),
       nominal: String(row.nominal ?? ""),
       keterangan: String(row.keterangan ?? ""),
-      pelaporanBulan: String(row.pelaporan_bulan ?? ""),
-      paymentSplitGroupId: String(row.payment_split_group_id ?? ""),
+      pelaporanBulan: pelaporanBulanIsoFromDbRecord(row),
+      paymentSplitGroupId: row.payment_split_group_id ? String(row.payment_split_group_id) : undefined,
       updatedAt: String(row.updated_at ?? ""),
-    });
+    };
+    };
     const mapKamar = (row: Record<string, unknown>): KamarRow => {
       const statusRaw = String(row.status ?? "Available");
       const status: KamarRow["status"] =
@@ -403,12 +557,49 @@ export default function DashboardPage() {
       createdAt: row.created_at ? String(row.created_at) : undefined,
     });
     const loadCloudRows = async () => {
+      if (!sessionHydrated) return;
+      await supabase.auth.refreshSession().catch(() => undefined);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setCloudDataError("Tidak ada sesi aktif. Silakan login ulang.");
+        return;
+      }
       const [kamarRes, penghuniRes, financeRes] = await Promise.all([
         supabase.from("kamar").select("*"),
         supabase.from("penghuni").select("*"),
         supabase.from("finance").select("*"),
       ]);
       if (cancelled) return;
+      const errParts = [
+        kamarRes.error?.message ? `kamar: ${kamarRes.error.message}` : "",
+        penghuniRes.error?.message ? `penghuni: ${penghuniRes.error.message}` : "",
+        financeRes.error?.message ? `finance: ${financeRes.error.message}` : "",
+      ].filter(Boolean);
+      if (errParts.length) {
+        const msg = errParts.join(" · ");
+        setCloudDataError(msg);
+        toast(`Data cloud bermasalah. ${msg}. Jalankan lagi SQL strict_production_rls atau tombol HARD REFRESH.`, "error");
+      } else {
+        setCloudDataError("");
+      }
+      const nk = (kamarRes.data ?? []).length;
+      const np = (penghuniRes.data ?? []).length;
+      const nf = (financeRes.data ?? []).length;
+      const anyOperational = nk + np + nf > 0;
+      if (anyOperational) {
+        warnedEmptyOperationalRef.current = false;
+      } else if (!cancelled && errParts.length === 0 && session?.user) {
+        const mc = masterRowCountsRef.current;
+        if ((mc.lokasi > 0 || mc.blok > 0) && !warnedEmptyOperationalRef.current) {
+          warnedEmptyOperationalRef.current = true;
+          toast(
+            "Kamar, penghuni, dan finance kosong padahal master lokasi/blok ada — biasanya RLS PostgreSQL atau array akses_lokasi/akses_blok di user_profiles. Super Admin: jalankan lagi bagian helper function di strict_production_rls.sql (has_global_operational_access), atau buka Master → Edit user → simpan lagi untuk menyegarkan akses.",
+            "error",
+          );
+        }
+      }
       const allPenghuni = (penghuniRes.data ?? []) as Array<Record<string, unknown>>;
       setCloudKamarRows((kamarRes.data ?? []).map((r) => mapKamar(r as Record<string, unknown>)));
       setCloudPenghuniRows(
@@ -427,12 +618,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [localDemoMode]);
-
-  const globalLokasiBlokScope = useMemo(() => {
-    if (localDemoMode && !sessionUserId) return true;
-    return canSelectAllLokasiDanBlok(profileRole);
-  }, [localDemoMode, sessionUserId, profileRole]);
+  }, [localDemoMode, sessionHydrated, cloudSyncTick]);
 
   const lokasiBaseList = useMemo(() => {
     if (localDemoMode) {
@@ -556,27 +742,82 @@ export default function DashboardPage() {
   }, [financeRows, selectedLokasi, selectedUnit]);
 
   const isOwnerRole = profileRole.trim().toLowerCase() === "owner";
+  const showOwnerRingkasan = !isOwnerRole || ownerMenuPanel === "ringkasan";
+  const showOwnerPenghuniSection = !isOwnerRole || ownerMenuPanel === "penghuni";
+  const showOwnerPlBlock = !isOwnerRole || ownerMenuPanel === "pl";
+  const showOwnerFinanceDetail = !isOwnerRole || ownerMenuPanel === "finance";
+
   /** Untuk owner: filter bulan P&amp;L kalender; peran lain: sama dengan filter lokasi/unit saja. */
   const financeRowsForOwnerPnl = useMemo(() => {
     if (!isOwnerRole) return financeRowsScoped;
     return financeRowsScoped.filter((f) => financeRowCalendarYm(f) === ownerPnlMonth);
   }, [isOwnerRole, financeRowsScoped, ownerPnlMonth]);
-  const ownerNoDataForMonth = isOwnerRole && financeRowsForOwnerPnl.length === 0;
+  /** Owner: sembunyikan P&amp;L manajemen (pemasukan non-sewa kamar + pengeluaran scope manajemen). */
+  const financeRowsForOwnerPlDisplay = useMemo(() => {
+    if (!isOwnerRole) return financeRowsForOwnerPnl;
+    return financeRowsForOwnerPnl.filter((f) => !isManajemenPlFinanceUiRow(f));
+  }, [isOwnerRole, financeRowsForOwnerPnl]);
+  const ownerNoDataForMonth = isOwnerRole && financeRowsForOwnerPlDisplay.length === 0;
 
   useEffect(() => {
     if (!localDemoMode || !isOwnerRole) return;
+    if (ownerMenuPanel === null) return;
     const key = `${ownerPnlMonth}|${selectedLokasi}|${selectedUnit}`;
     if (ownerNoDataForMonth && ownerPnlToastKeyRef.current !== key) {
       ownerPnlToastKeyRef.current = key;
-      toast(`Data tidak ditemukan untuk P&L ${ownerPnlMonth} pada filter saat ini.`, "info");
+      toast(
+        `Tidak ada transaksi kos (tanpa manajemen) untuk P&L bulan ${ownerPnlMonth} pada filter ini. Opsional: sesuaikan bulan P&L.`,
+        "info",
+      );
     }
     if (!ownerNoDataForMonth) {
       ownerPnlToastKeyRef.current = "";
     }
-  }, [localDemoMode, isOwnerRole, ownerNoDataForMonth, ownerPnlMonth, selectedLokasi, selectedUnit, toast]);
+  }, [localDemoMode, isOwnerRole, ownerMenuPanel, ownerNoDataForMonth, ownerPnlMonth, selectedLokasi, selectedUnit, toast]);
+
+  useEffect(() => {
+    if (!isOwnerRole || ownerMenuPanel !== "pl") return;
+    setOwnerPlSectionOpen(true);
+  }, [isOwnerRole, ownerMenuPanel]);
+
+  const scopedRoleNeedsBlokForRls = useMemo(() => {
+    if (localDemoMode || !profileLoaded) return false;
+    const r = profileRole.trim().toLowerCase();
+    if (r !== "owner" && r !== "staff") return false;
+    return !canSelectAllLokasiDanBlok(profileRole) && aksesBlokIds.length === 0;
+  }, [
+    localDemoMode,
+    profileLoaded,
+    profileRole,
+    aksesBlokIds.length,
+  ]);
+
+  /** Akun lokasi/blok terbatas: fetch sukses tapi tidak ada satu pun baris (biasanya RLS atau teks lokasi≠master). */
+  const scopedOperationalFetchEmptyHint = useMemo(() => {
+    if (localDemoMode || !profileLoaded || !sessionUserId || cloudDataError.trim()) return false;
+    if (globalLokasiBlokScope) return false;
+    if (aksesLokasiIds.length === 0 || aksesBlokIds.length === 0) return false;
+    const sum =
+      cloudKamarRows.length +
+      cloudPenghuniRows.length +
+      cloudSurveyRows.length +
+      cloudFinanceRows.length;
+    return sum === 0;
+  }, [
+    localDemoMode,
+    profileLoaded,
+    sessionUserId,
+    cloudDataError,
+    globalLokasiBlokScope,
+    aksesLokasiIds.length,
+    aksesBlokIds.length,
+    cloudKamarRows.length,
+    cloudPenghuniRows.length,
+    cloudSurveyRows.length,
+    cloudFinanceRows.length,
+  ]);
 
   const penghuniForTable = useMemo(() => {
-    if (!localDemoMode) return [] as PenghuniRow[];
     let rows = [...penghuniRows];
     if (lokasiFilterActive(selectedLokasi)) {
       rows = rows.filter((r) => r.lokasiKos === selectedLokasi);
@@ -589,18 +830,10 @@ export default function DashboardPage() {
           `${r.unitBlok} · ${r.noKamar}`.trim().startsWith(selectedUnit)
       );
     }
-    if (isOwnerRole) {
-      rows = rows.filter((r) => {
-        const ci = toYmFromYmd(r.tglCheckIn);
-        const co = toYmFromYmd(r.tglCheckOut);
-        return ci === ownerPnlMonth || co === ownerPnlMonth;
-      });
-    }
     return rows;
-  }, [localDemoMode, penghuniRows, selectedLokasi, selectedUnit, isOwnerRole, ownerPnlMonth]);
+  }, [penghuniRows, selectedLokasi, selectedUnit]);
 
   const kamarRowsFiltered = useMemo(() => {
-    if (!localDemoMode) return [] as KamarRow[];
     let rows = kamarRowsSynced;
     if (lokasiFilterActive(selectedLokasi)) {
       rows = rows.filter((k) => k.lokasiKos === selectedLokasi);
@@ -608,14 +841,8 @@ export default function DashboardPage() {
     if (unitFilterActive(selectedUnit)) {
       rows = rows.filter((k) => String(k.unitBlok ?? "").trim() === selectedUnit);
     }
-    if (isOwnerRole) {
-      const unitKeys = new Set(
-        penghuniForTable.map((p) => `${String(p.lokasiKos ?? "").trim()}|${String(p.unitBlok ?? "").trim()}`)
-      );
-      rows = rows.filter((k) => unitKeys.has(`${String(k.lokasiKos ?? "").trim()}|${String(k.unitBlok ?? "").trim()}`));
-    }
     return rows;
-  }, [localDemoMode, kamarRowsSynced, selectedLokasi, selectedUnit, isOwnerRole, penghuniForTable]);
+  }, [kamarRowsSynced, selectedLokasi, selectedUnit]);
 
   const surveyDashboardRows = useMemo(() => {
     let rows = [...surveyCalonRows];
@@ -625,104 +852,61 @@ export default function DashboardPage() {
     if (unitFilterActive(selectedUnit)) {
       rows = rows.filter((r) => r.unitBlok === selectedUnit);
     }
-    if (isOwnerRole) {
-      rows = rows.filter((r) => toYmFromYmd(r.rencanaCheckIn) === ownerPnlMonth);
-    }
     const sortKey = (d: string) => (d && String(d).trim() ? String(d) : "9999-12-31");
     return rows.sort((a, b) => sortKey(a.rencanaCheckIn).localeCompare(sortKey(b.rencanaCheckIn)));
-  }, [surveyCalonRows, selectedLokasi, selectedUnit, isOwnerRole, ownerPnlMonth]);
+  }, [surveyCalonRows, selectedLokasi, selectedUnit]);
 
-  const displayStats = useMemo(() => {
-    if (!localDemoMode) return [];
+  const dashboardKamarStats = useMemo(() => {
     const total = kamarRowsFiltered.length;
-    const occ = kamarRowsFiltered.filter((k) => k.status === "Occupied").length;
-    const av = kamarRowsFiltered.filter((k) => k.status === "Available").length;
-    const maint = kamarRowsFiltered.filter((k) => k.status === "Maintenance").length;
-    const pemasukanRows = financeRowsForOwnerPnl.filter((f) => f.kategori === "Pemasukan");
-    const isOwnerRevenue = isOwnerRole;
-    const revenueRows = isOwnerRevenue
+    const terisi = kamarRowsFiltered.filter((k) => k.status === "Occupied").length;
+    const kosong = kamarRowsFiltered.filter((k) => k.status === "Available").length;
+    const maintenance = kamarRowsFiltered.filter((k) => k.status === "Maintenance").length;
+    const pct = total > 0 ? Math.round((terisi / total) * 100) : 0;
+    return { total, terisi, kosong, maintenance, pct };
+  }, [kamarRowsFiltered]);
+
+  const financeRowsForDashboardPl = isOwnerRole ? financeRowsForOwnerPlDisplay : financeRowsScoped;
+
+  const dashboardPlBreakdown = useMemo(() => {
+    return computeLaporanFinanceBreakdown(financeUiRowsToReportRows(financeRowsForDashboardPl));
+  }, [financeRowsForDashboardPl]);
+
+  const dashboardRevenue = useMemo(() => {
+    const plBaseRows = isOwnerRole ? financeRowsForOwnerPlDisplay : financeRowsForOwnerPnl;
+    const pemasukanRows = plBaseRows.filter((f) => f.kategori === "Pemasukan");
+    const revenueRows = isOwnerRole
       ? pemasukanRows.filter((f) => !isExcludedFromOwnerDashboardRevenue(f.pos))
       : pemasukanRows;
-    const revenue = revenueRows.reduce((sum, f) => sum + (Number(f.nominal) || 0), 0);
-    const revenueStr = revenue > 0 ? `Rp ${revenue.toLocaleString("id-ID")}` : "Rp 0";
-    const surveyTotal = isOwnerRole ? surveyDashboardRows.length : surveyCalonRows.length;
-    const surveyFiltered = surveyDashboardRows.length;
-
-    return [
-      {
-        label: "Kamar Occupied",
-        value: String(occ),
-        note: total ? `${occ} dari ${total} kamar` : "Belum ada data kamar",
-        icon: Building2,
-      },
-      {
-        label: "Kamar Available",
-        value: String(av),
-        note: total ? `${av} tersedia` : "Tambah di halaman Kamar",
-        icon: CheckCircle2,
-      },
-      {
-        label: "Maintenance",
-        value: String(maint),
-        note: maint ? "Perlu perhatian" : "Tidak ada",
-        icon: AlertTriangle,
-      },
-      {
-        label: "Calon survey",
-        value: String(surveyFiltered),
-        note:
-          surveyTotal === 0
-            ? isOwnerRole
-              ? `Tidak ada data survey untuk P&L ${ownerPnlMonth}`
-              : "Tambah lewat Penghuni → Survey Baru"
-            : `${surveyTotal} total · ${surveyFiltered} sesuai filter`,
-        icon: ClipboardList,
-      },
-      {
-        label: "Total Revenue (Pemasukan)",
-        value: revenueStr,
-        note:
-          isOwnerRevenue
-            ? ownerNoDataForMonth
-              ? `Data P&L ${ownerPnlMonth} tidak ditemukan pada filter saat ini`
-              : `${revenueRows.length} transaksi · P&L ${ownerPnlMonth} (deposit/booking tidak dijumlahkan)`
-            : `${pemasukanRows.length} transaksi`,
-        icon: BadgeDollarSign,
-      },
-    ];
-  }, [
-    localDemoMode,
-    kamarRowsFiltered,
-    financeRowsScoped,
-    financeRowsForOwnerPnl,
-    surveyCalonRows,
-    surveyDashboardRows,
-    profileRole,
-    isOwnerRole,
-    ownerNoDataForMonth,
-    ownerPnlMonth,
-  ]);
-
-  const okupansiPercent = useMemo(() => {
-    if (!localDemoMode || kamarRowsFiltered.length === 0) return 0;
-    const occ = kamarRowsFiltered.filter((k) => k.status === "Occupied").length;
-    return Math.round((occ / kamarRowsFiltered.length) * 100);
-  }, [localDemoMode, kamarRowsFiltered]);
+    const revenue = revenueRows.reduce(
+      (sum, f) => sum + (Number(String(f.nominal).replace(/\D/g, "")) || 0),
+      0
+    );
+    return {
+      revenue,
+      count: revenueRows.length,
+      display: revenue > 0 ? `Rp ${revenue.toLocaleString("id-ID")}` : "Rp 0",
+      note: isOwnerRole
+        ? ownerNoDataForMonth
+          ? `P&L ${ownerPnlMonth} — tidak ada data pada filter ini`
+          : `${revenueRows.length} trx · deposit/booking tidak dijumlahkan · bukan laba (lihat P&L di bawah)`
+        : `${revenueRows.length} transaksi pemasukan · P&L mengikuti filter lokasi/unit`,
+    };
+  }, [financeRowsForOwnerPnl, financeRowsForOwnerPlDisplay, isOwnerRole, ownerNoDataForMonth, ownerPnlMonth]);
 
   /** Checkout hari ini + H-1 … H-7 (mengikuti filter lokasi/unit) — untuk panel & notifikasi in-app. */
   const checkoutNoticeEntries = useMemo(() => {
-    if (!localDemoMode) return [];
     return penghuniForTable
       .map((r) => ({ row: r, days: calendarDaysUntilCheckout(r.tglCheckOut) }))
       .filter((x) => x.days !== null && x.days >= 0 && x.days <= 7)
       .sort((a, b) => (a.days ?? 99) - (b.days ?? 99));
-  }, [localDemoMode, penghuniForTable]);
+  }, [penghuniForTable]);
 
   const checkoutNoticeCount = checkoutNoticeEntries.length;
 
   useEffect(() => {
-    if (!localDemoMode || !sandboxReady) return;
+    if (localDemoMode && !sandboxReady) return;
     if (checkoutNoticeCount === 0) return;
+    if (isOwnerRole && ownerMenuPanel !== "penghuni") return;
     const now = Date.now();
     if (now - checkoutToastLastFiredRef.current < 750) return;
     checkoutToastLastFiredRef.current = now;
@@ -732,10 +916,9 @@ export default function DashboardPage() {
         : `Ada ${checkoutNoticeCount} penghuni dalam jendela checkout (hari ini s/d 7 hari ke depan). Lihat panel peringatan di bawah.`,
       "info"
     );
-  }, [localDemoMode, sandboxReady, checkoutNoticeCount, toast]);
+  }, [localDemoMode, sandboxReady, checkoutNoticeCount, toast, isOwnerRole, ownerMenuPanel]);
 
   const displayPenghuni = useMemo(() => {
-    if (!localDemoMode) return [];
     const mapped = penghuniForTable.map((r) => {
       const daysUntilCheckout = calendarDaysUntilCheckout(r.tglCheckOut);
       return {
@@ -762,10 +945,9 @@ export default function DashboardPage() {
       if (penghuniListFilter === "booking") return row.penghuniStatus === "Booking";
       return true;
     });
-  }, [localDemoMode, penghuniForTable, penghuniListFilter]);
+  }, [penghuniForTable, penghuniListFilter]);
 
   const displayPengeluaran = useMemo(() => {
-    if (!localDemoMode) return [];
     let rows = financeRows;
     if (lokasiFilterActive(selectedLokasi)) {
       rows = rows.filter((f) => !f.lokasiKos || f.lokasiKos === selectedLokasi);
@@ -779,13 +961,17 @@ export default function DashboardPage() {
       );
     }
     if (isOwnerRole) {
-      rows = rows.filter((f) => financeRowCalendarYm(f) === ownerPnlMonth);
+      rows = rows.filter(
+        (f) =>
+          financeRowCalendarYm(f) === ownerPnlMonth && !isManajemenPlFinanceUiRow(f)
+      );
     }
     return rows
       .filter((f) => f.kategori === "Pengeluaran")
       .map((f) => ({
         id: f.id,
         kategori: f.pos || f.keterangan || "Pengeluaran",
+        lingkup: normalizePengeluaranScope(f.pengeluaranScope) === "manajemen" ? "Manajemen" : "Kos",
         tanggal: f.tanggal,
         nominal:
           f.nominal !== "" && !Number.isNaN(Number(f.nominal))
@@ -793,11 +979,11 @@ export default function DashboardPage() {
             : "Rp 0",
         status: "Paid Out",
       }));
-  }, [localDemoMode, financeRows, selectedLokasi, selectedUnit, isOwnerRole, ownerPnlMonth]);
+  }, [financeRows, selectedLokasi, selectedUnit, isOwnerRole, ownerPnlMonth]);
 
   const displayPemasukan = useMemo(() => {
-    if (!localDemoMode) return [];
-    return financeRowsForOwnerPnl
+    const base = isOwnerRole ? financeRowsForOwnerPlDisplay : financeRowsForOwnerPnl;
+    return base
       .filter((f) => f.kategori === "Pemasukan")
       .map((f) => ({
         id: f.id,
@@ -809,37 +995,54 @@ export default function DashboardPage() {
             : "Rp 0",
         status: "Paid",
       }));
-  }, [localDemoMode, financeRowsForOwnerPnl]);
+  }, [financeRowsForOwnerPnl, financeRowsForOwnerPlDisplay, isOwnerRole]);
 
   const totalPengeluaranNominal = useMemo(
     () => displayPengeluaran.reduce((s, r) => s + Number(String(r.nominal).replace(/[^\d]/g, "") || 0), 0),
     [displayPengeluaran]
   );
+  const displayPengeluaranSplit = useMemo(() => {
+    let kos = 0;
+    let manajemen = 0;
+    for (const r of displayPengeluaran) {
+      const n = Number(String(r.nominal).replace(/\D/g, "") || 0);
+      if (r.lingkup === "Manajemen") manajemen += n;
+      else kos += n;
+    }
+    return { kos, manajemen };
+  }, [displayPengeluaran]);
   const totalPemasukanNominal = useMemo(
     () => displayPemasukan.reduce((s, r) => s + Number(String(r.nominal).replace(/[^\d]/g, "") || 0), 0),
     [displayPemasukan]
   );
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[2rem] border border-[#d8defc]/70 bg-gradient-to-r from-[#f6f8ff] via-[#eef2ff] to-[#f3f1ff] p-6 shadow-[0_22px_70px_-35px_rgba(63,79,157,0.45)] dark:border-[#4f5b99] dark:from-[#1a2144] dark:via-[#1b1f3d] dark:to-[#1f2344]">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-[#9b7a4f] dark:text-[#d8bc94]">
+    <div className="min-w-0 space-y-4 sm:space-y-6">
+      <section className="rounded-2xl border border-[#d8defc]/70 bg-gradient-to-r from-[#f6f8ff] via-[#eef2ff] to-[#f3f1ff] p-4 shadow-[0_22px_70px_-35px_rgba(63,79,157,0.45)] dark:border-[#4f5b99] dark:from-[#1a2144] dark:via-[#1b1f3d] dark:to-[#1f2344] sm:rounded-[2rem] sm:p-6">
+        <div className="flex min-w-0 flex-col gap-4 sm:gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#9b7a4f] dark:text-[#d8bc94] sm:text-xs sm:tracking-[0.3em]">
               Dashboard
             </p>
-            <h1 className="mt-2 text-3xl font-semibold text-[#2a2017] dark:text-[#f7e9d4]">
-              Ringkasan Operasional Second Room
+            <h1 className="mt-2 text-xl font-semibold tracking-tight text-[#2a2017] dark:text-[#f7e9d4] sm:text-2xl md:text-3xl">
+              {isOwnerRole ? "INFORMASI LENGKAP KOS ANDA" : "Ringkasan Operasional Second Room"}
             </h1>
-            <p className="mt-2 text-sm text-[#725a3d] dark:text-[#c0a783]">
-              {localDemoMode
-                ? "Angka dan tabel di bawah menampilkan data operasional saat ini."
-                : "Data dashboard ditampilkan dari Supabase."}
+            <p className="mt-2 text-[13px] leading-relaxed text-[#725a3d] dark:text-[#c0a783] sm:text-sm">
+              {isOwnerRole ? (
+                <>
+                  Pilih menu yang tersedia untuk mengetahui data dashboard. Seluruh data menu mengikuti Filter Bulan
+                  yang ada di aplikasi.
+                </>
+              ) : localDemoMode ? (
+                "Angka dan tabel di bawah menampilkan data operasional saat ini."
+              ) : (
+                "Data dashboard ditampilkan dari Supabase."
+              )}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-full border border-[#c5a67b]/60 bg-[#f4e6d0] px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] text-[#725531] dark:border-[#5d4832] dark:bg-[#35281a] dark:text-[#e5c8a2]">
+          <div className="flex w-full min-w-0 shrink-0 flex-col gap-3 sm:w-auto sm:max-w-full sm:flex-row sm:flex-wrap sm:items-center">
+            <span className="inline-flex min-h-[2.75rem] w-fit items-center rounded-full border border-[#c5a67b]/60 bg-[#f4e6d0] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#725531] dark:border-[#5d4832] dark:bg-[#35281a] dark:text-[#e5c8a2] sm:min-h-0 sm:text-xs sm:tracking-[0.15em]">
               Role: {profileRole || "—"}
             </span>
             <select
@@ -848,7 +1051,7 @@ export default function DashboardPage() {
                 setSelectedLokasi(event.target.value);
                 setSelectedUnit(UNIT_SEMUA);
               }}
-              className="rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f]"
+              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:w-auto sm:min-w-[11rem]"
             >
               {lokasiOptions.map((lokasi) => (
                 <option key={lokasi} value={lokasi}>
@@ -859,7 +1062,7 @@ export default function DashboardPage() {
             <select
               value={selectedUnit}
               onChange={(event) => setSelectedUnit(event.target.value)}
-              className="rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f]"
+              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:w-auto sm:min-w-[11rem]"
             >
               <option value={UNIT_SEMUA}>{UNIT_SEMUA}</option>
               {unitOptions.map((unit) => (
@@ -869,77 +1072,426 @@ export default function DashboardPage() {
               ))}
             </select>
             {isOwnerRole ? (
-              <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8c6d47] dark:text-[#c9a77e]">
-                P&amp;L bulan (owner)
-                <input
-                  type="month"
-                  value={ownerPnlMonth}
-                  onChange={(e) => setOwnerPnlMonth(e.target.value || defaultPnlCalendarYm())}
-                  className="rounded-full border border-[#b89468] bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-[#4a3824] outline-none ring-[#b89468] focus:ring-2 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f]"
-                />
-              </label>
+              <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8c6d47] dark:text-[#c9a77e]">
+                  Bulan P&amp;L (keuangan)
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="touch-manipulation inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c4a574] bg-white text-base font-semibold text-[#5c4328] shadow-sm transition hover:bg-[#faf3e8] active:scale-95 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] dark:hover:bg-[#3d2e20] sm:h-9 sm:w-9"
+                    aria-label="Bulan sebelumnya"
+                    onClick={() => setOwnerPnlMonth((m) => addCalendarMonthsYm(m, -1))}
+                  >
+                    ‹
+                  </button>
+                  <input
+                    type="month"
+                    value={ownerPnlMonth}
+                    onChange={(e) => setOwnerPnlMonth(e.target.value || defaultPnlCalendarYm())}
+                    className="min-h-[2.75rem] min-w-0 flex-1 rounded-full border border-[#b89468] bg-white px-3 py-2 text-sm font-medium text-[#4a3824] outline-none ring-[#b89468] focus:ring-2 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] sm:min-w-[9.5rem] sm:flex-none"
+                  />
+                  <button
+                    type="button"
+                    className="touch-manipulation inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c4a574] bg-white text-base font-semibold text-[#5c4328] shadow-sm transition hover:bg-[#faf3e8] active:scale-95 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] dark:hover:bg-[#3d2e20] sm:h-9 sm:w-9"
+                    aria-label="Bulan berikutnya"
+                    onClick={() => setOwnerPnlMonth((m) => addCalendarMonthsYm(m, 1))}
+                  >
+                    ›
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOwnerPnlMonth(defaultPnlCalendarYm())}
+                    className="touch-manipulation min-h-[2.75rem] rounded-full border border-[#7c9fff]/80 bg-gradient-to-r from-[#e8edff] to-[#f2e8ff] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#3d4a8f] shadow-sm transition hover:brightness-105 active:scale-[0.98] dark:border-[#5c6ba3] dark:from-[#252b48] dark:to-[#2a2450] dark:text-[#c8d4ff] sm:min-h-0 sm:px-3"
+                  >
+                    Bulan ini
+                  </button>
+                </div>
+              </div>
             ) : null}
           </div>
         </div>
-        {isOwnerRole && ownerNoDataForMonth ? (
-          <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-            Data tidak ditemukan untuk P&amp;L bulan {ownerPnlMonth} pada filter lokasi/unit saat ini.
+        {scopedRoleNeedsBlokForRls ? (
+          <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
+            <span className="font-semibold">Akses blok belum dipilih untuk akun Anda.</span> Di PostgreSQL, baris penghuni
+            dan kamar hanya terbaca jika <strong>minimal satu blok</strong> ada di kolom{' '}
+            <code className="rounded bg-red-100/70 px-0.5 text-[0.65rem] dark:bg-red-900/50">akses_blok</code>.
+            Minta Super Admin buka{' '}
+            <strong className="font-semibold">Master → Management User</strong>, Edit user Anda, centang blok yang diizinkan,
+            simpan lagi.
           </p>
+        ) : null}
+        {isOwnerRole && ownerNoDataForMonth ? (
+          <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            Tidak ada transaksi <strong className="font-semibold">kos</strong> (bukan manajemen) untuk P&amp;L bulan{' '}
+            <strong className="font-semibold">{ownerPnlMonth}</strong> pada filter lokasi/unit. Penghuni &amp; okupansi
+            mengikuti filter lokasi/unit; ubah pemilih bulan P&amp;L untuk melihat periode lain.
+          </p>
+        ) : null}
+        {!localDemoMode && cloudDataError ? (
+          <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-900 dark:border-red-900 dark:bg-red-950/45 dark:text-red-100">
+            <span className="font-semibold">Gagal memuat beberapa data dari Supabase.</span> {cloudDataError}
+            {cloudDataError.includes("stack depth") ? (
+              <>
+                {" "}
+                — ini biasanya rekursi RLS. Super Admin jalankan sekali{' '}
+                <code className="rounded bg-red-100/80 px-1 text-[0.65rem] dark:bg-red-900/50">
+                  supabase/fix_rls_stack_depth_recursion.sql
+                </code>{' '}
+                di SQL Editor Supabase (
+                <code className="text-[0.65rem]">SET row_security = off</code> pada{' '}
+                <code className="text-[0.65rem]">current_user_role</code> &amp;{' '}
+                <code className="text-[0.65rem]">has_scope_access</code>), refresh halaman / HARD REFRESH.
+              </>
+            ) : (
+              <>
+                {" "}
+                — tekan <strong>HARD REFRESH</strong> di header atau jalankan pembaruan fungsi helper RLS dari repo (
+                <code className="rounded bg-red-100/80 px-1 dark:bg-red-900/50">strict_production_rls.sql</code> atau{' '}
+                <code className="rounded bg-red-100/80 px-1 dark:bg-red-900/50">fix_rls_stack_depth_recursion.sql</code>
+                ).
+              </>
+            )}
+          </p>
+        ) : null}
+        {!localDemoMode && scopedOperationalFetchEmptyHint && !scopedRoleNeedsBlokForRls ? (
+          <div className="mt-4 space-y-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-xs leading-relaxed text-sky-950 dark:border-sky-800 dark:bg-sky-950/35 dark:text-sky-100">
+            <p className="font-semibold">
+              Tidak ada data operasional yang dikembalikan Supabase untuk akun ini (
+              <span className="tabular-nums">
+                akses lokasi: {aksesLokasiIds.length}, blok: {aksesBlokIds.length}
+              </span>
+              ). Mengganti bulan P&amp;L tidak mempengaruhi hal ini — sumbernya di server (
+              <abbr title="Row Level Security" className="no-underline">
+                RLS
+              </abbr>
+              ), bukan filter bulan di dashboard.
+            </p>
+            <ol className="list-inside list-decimal space-y-1.5 pt-1 text-[11px]">
+              <li>
+                Super Admin: jalankan skrip{' '}
+                <code className="rounded bg-sky-100/90 px-1 text-[0.65rem] dark:bg-sky-900/55">
+                  supabase/fix_has_scope_access_join.sql
+                </code>{' '}
+                di SQL Editor Supabase (memperbaiki fungsi <code className="text-[0.65rem]">has_scope_access</code> dengan
+                relasi blok→lokasi yang benar), lalu coba lagi.
+              </li>
+              <li>
+                Pastikan isian <strong>lokasi</strong> dan <strong>blok/unit</strong> pada halaman{' '}
+                <strong>Kamar</strong> dan <strong>Penghuni</strong> sama persis dengan nama di{' '}
+                <strong>Master → Lokasi &amp; Blok</strong> (huruf besar/kecil diabaikan oleh kebijakan, spasi tidak).
+              </li>
+              <li>
+                Untuk akun akses blok, baris Penghuni/Kamar tidak boleh membiarkan{' '}
+                <code className="text-[0.65rem]">lokasi_kos</code> atau{' '}
+                <code className="text-[0.65rem]">unit_blok</code> kosong — kosong sama sekali bisa ditolak RLS.
+              </li>
+              <li>
+                Minta Super Admin membuka{' '}
+                <strong className="font-semibold">Master → Edit user Anda → Simpan</strong> lagi setelah pengaturan blok,
+                lalu Anda <strong className="font-semibold">logout / login ulang</strong>.
+              </li>
+            </ol>
+          </div>
+        ) : null}
+        {isOwnerRole ? (
+          <div className="mt-4 border-t border-[#c9d4ff]/40 pt-4 dark:border-[#4f5b99]/50 sm:mt-5">
+            <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6d5a8a] dark:text-[#a8b0d4] sm:mb-3">
+              Menu
+            </p>
+            <div className="grid grid-cols-1 gap-2.5 min-[440px]:grid-cols-2 lg:grid-cols-4 lg:gap-3">
+              {OWNER_DASHBOARD_MENU.map(
+                ({
+                  id,
+                  title,
+                  description,
+                  Icon,
+                  cardIdle,
+                  cardSelected,
+                  iconIdle,
+                  iconSelected,
+                  focusRing,
+                  descClass,
+                }) => {
+                  const selected = ownerMenuPanel === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setOwnerMenuPanel((cur) => (cur === id ? null : id))}
+                      className={`touch-manipulation flex min-h-[5.75rem] flex-col gap-2 rounded-[1.1rem] border p-3.5 text-left outline-none transition-[transform,box-shadow,filter] duration-300 hover:-translate-y-0.5 hover:brightness-[1.02] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#f6f8ff] active:translate-y-0 active:scale-[0.99] motion-reduce:transition-none motion-reduce:hover:translate-y-0 sm:min-h-0 sm:rounded-[1.25rem] sm:p-4 sm:hover:-translate-y-1 dark:hover:brightness-110 dark:focus-visible:ring-offset-[#12152a] ${focusRing} ${
+                        selected ? cardSelected : cardIdle
+                      }`}
+                      aria-pressed={selected}
+                    >
+                      <span
+                        className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-[box-shadow,background-color,border-color,color] duration-300 sm:h-10 sm:w-10 ${
+                          selected ? iconSelected : iconIdle
+                        }`}
+                      >
+                        <Icon size={20} strokeWidth={1.85} className="shrink-0" aria-hidden />
+                      </span>
+                      <span className="text-[13px] font-semibold leading-snug text-[#2a2017] dark:text-[#f4e8d6] sm:text-sm">
+                        {title}
+                      </span>
+                      <span className={`text-[11px] leading-snug sm:leading-snug ${descClass}`}>{description}</span>
+                    </button>
+                  );
+                }
+              )}
+            </div>
+          </div>
         ) : null}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-5">
-        <div className="rounded-[1.7rem] border border-[#d6ddff] bg-[#f7f8ff] p-5 dark:border-[#4f5b99] dark:bg-[#1a2144] lg:col-span-1">
+      {isOwnerRole && ownerMenuPanel === null ? (
+        <section
+          className="rounded-xl border border-dashed border-[#c5a67b]/50 bg-[#fffdf9]/60 px-4 py-8 text-center dark:border-[#5d4832] dark:bg-[#1e1812]/40 sm:rounded-[1.5rem] sm:px-5 sm:py-10"
+          aria-live="polite"
+        >
+          <p className="text-[13px] font-medium leading-relaxed text-[#5c4328] dark:text-[#e8d4bc] sm:text-sm">
+            Pilih salah satu menu di atas untuk menampilkan data dashboard.
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#bfa27f] sm:text-xs">
+            Ketuk kartu yang sama lagi untuk menutup dan kembali ke tampilan bersih.
+          </p>
+        </section>
+      ) : null}
+
+      {showOwnerRingkasan ? (
+      <div
+        id="dashboard-owner-overview"
+        className={`min-w-0 scroll-mt-[4.75rem] sm:scroll-mt-24 ${isOwnerRole ? "rounded-xl border border-amber-200/50 bg-gradient-to-br from-[#fffbf5] via-transparent to-[#f3f7ff]/80 p-1 dark:border-[#4a3928]/60 dark:from-[#221a14]/40 dark:to-[#1a1f38]/60 sm:rounded-[1.85rem]" : ""}`}
+      >
+      <section className="grid min-w-0 grid-cols-1 gap-3 p-0.5 sm:grid-cols-2 sm:gap-4 sm:p-1 md:grid-cols-3 xl:grid-cols-5">
+        <article
+          className={`min-w-0 rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] p-4 transition-shadow dark:border-[#4f5b99] dark:bg-[#1a2144] sm:rounded-[1.7rem] sm:p-5 ${isOwnerRole ? "shadow-[0_8px_30px_-12px_rgba(140,107,67,0.35)] hover:shadow-[0_14px_40px_-14px_rgba(140,107,67,0.45)] motion-reduce:transition-none motion-reduce:hover:shadow-none" : ""}`}
+        >
           <div className="flex items-center gap-2">
-            <BedDouble size={15} className={iconTone.brand} />
+            <BedDouble size={16} className={iconTone.brand} />
             <p className="text-xs uppercase tracking-[0.2em] text-[#8c6b43] dark:text-[#d8bb92]">
               Okupansi
             </p>
           </div>
-          <p className="mt-3 text-4xl font-semibold text-[#2d2217] dark:text-[#f5e8d4]">
-            {localDemoMode ? `${okupansiPercent}%` : "—"}
+          <p className="mt-3 text-2xl font-semibold tabular-nums text-[#2d2217] dark:text-[#f5e8d4] sm:text-3xl">
+            {dashboardKamarStats.total > 0 ? `${dashboardKamarStats.pct}%` : "0%"}
           </p>
-          <p className="mt-1 text-xs text-[#816344] dark:text-[#bfa27f]">
-            {localDemoMode && kamarRows.length > 0
-              ? `${kamarRowsFiltered.filter((k) => k.status === "Occupied").length} dari ${kamarRowsFiltered.length} kamar terisi`
-              : localDemoMode
-                ? "Tambah data kamar di halaman Kamar."
-                : "Data okupansi belum tersedia."}
+          {isOwnerRole && dashboardKamarStats.total > 0 ? (
+            <div className="mt-3 overflow-hidden rounded-full bg-[#e8dcc9] dark:bg-[#33261b]" role="progressbar" aria-valuenow={dashboardKamarStats.pct} aria-valuemin={0} aria-valuemax={100} aria-label={`Okupansi ${dashboardKamarStats.pct}%`}>
+              <div
+                className="h-2.5 rounded-full bg-gradient-to-r from-[#c49a6c] via-[#6d32ff]/80 to-[#4d6dff] transition-[width] duration-500 ease-out motion-reduce:transition-none"
+                style={{ width: `${Math.min(100, Math.max(0, dashboardKamarStats.pct))}%` }}
+              />
+            </div>
+          ) : null}
+          <p className="mt-2 text-xs text-[#816344] dark:text-[#bfa27f]">
+            {dashboardKamarStats.total > 0
+              ? `${dashboardKamarStats.terisi} dari ${dashboardKamarStats.total} kamar terisi`
+              : "Belum ada data kamar pada filter ini."}
           </p>
-        </div>
+        </article>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:col-span-4 xl:grid-cols-4">
-          {displayStats.map((item) => (
-            <article key={item.label} className="rounded-[1.7rem] border border-[#d6ddff] bg-white/90 p-5 dark:border-[#4f5b99] dark:bg-[#1a2144]/95">
-              <div className="flex items-center gap-2">
-                <item.icon
-                  size={16}
-                  className={
-                    item.label.includes("Available")
-                      ? iconTone.success
-                      : item.label.includes("Maintenance")
-                        ? iconTone.danger
-                        : item.label.includes("Revenue")
-                          ? iconTone.info
-                          : iconTone.brand
-                  }
-                />
-                <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
-                  {item.label}
+        <article
+          className={`min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5 ${isOwnerRole ? "transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0" : ""}`}
+        >
+          <div className="flex items-center gap-2">
+            <BadgeDollarSign size={16} className={iconTone.info} />
+            <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
+              {isOwnerRole ? "Revenue owner" : "Total pemasukan"}
+            </p>
+            {isOwnerRole ? <TrendingUp size={14} className="ml-auto shrink-0 text-emerald-600/80 dark:text-emerald-400/90" aria-hidden /> : null}
+          </div>
+          <p className="mt-3 text-xl font-semibold tabular-nums leading-tight tracking-tight text-[#2e2318] dark:text-[#f7e9d5] sm:text-2xl">
+            {dashboardRevenue.display}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">{dashboardRevenue.note}</p>
+        </article>
+
+        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5">
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className={iconTone.brand} />
+            <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
+              Kamar terisi
+            </p>
+          </div>
+          <p className="mt-3 text-2xl font-semibold tabular-nums text-[#2e2318] dark:text-[#f7e9d5] sm:text-3xl">
+            {dashboardKamarStats.terisi}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">
+            Status Occupied · mengikuti filter lokasi/unit
+          </p>
+        </article>
+
+        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className={iconTone.success} />
+            <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
+              Kamar kosong
+            </p>
+          </div>
+          <p className="mt-3 text-2xl font-semibold tabular-nums text-[#2e2318] dark:text-[#f7e9d5] sm:text-3xl">
+            {dashboardKamarStats.kosong}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">
+            Status Available · siap sewa
+          </p>
+        </article>
+
+        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5">
+          <div className="flex items-center gap-2">
+            <Wrench size={16} className={iconTone.danger} />
+            <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
+              Maintenance
+            </p>
+          </div>
+          <p className="mt-3 text-2xl font-semibold tabular-nums text-[#2e2318] dark:text-[#f7e9d5] sm:text-3xl">
+            {dashboardKamarStats.maintenance}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">
+            Sedang tidak disewakan
+          </p>
+        </article>
+      </section>
+      </div>
+      ) : null}
+
+      {showOwnerPlBlock ? (
+      <div id="dashboard-owner-finance" className="min-w-0 scroll-mt-[4.75rem] sm:scroll-mt-24">
+      <section
+        className={`min-w-0 rounded-xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 to-white/95 p-3 transition-shadow dark:border-emerald-900/35 dark:from-emerald-950/30 dark:to-[#1a2144]/90 sm:rounded-[1.5rem] sm:p-4 ${isOwnerRole ? "ring-1 ring-emerald-200/60 dark:ring-emerald-800/40" : ""}`}
+      >
+        {isOwnerRole ? (
+          <button
+            type="button"
+            onClick={() => setOwnerPlSectionOpen((o) => !o)}
+            className="touch-manipulation flex min-h-[3rem] w-full items-start justify-between gap-3 rounded-lg py-1 text-left outline-none ring-emerald-500/50 focus-visible:ring-2 sm:min-h-0 sm:rounded-xl sm:py-0"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-900 dark:text-emerald-200/90 sm:text-xs sm:tracking-[0.18em]">
+                Ringkasan P&amp;L bulan {ownerPnlMonth}
+              </p>
+              <p className="mt-1 text-[10px] leading-relaxed text-[#5d7349] dark:text-[#b8cfa8] sm:text-[11px] sm:leading-snug">
+                Ketuk untuk membuka atau menutup detail. Hanya P&amp;L <strong>kost</strong> — transaksi manajemen tidak
+                ditampilkan untuk akun owner. Mengikuti filter lokasi/unit di atas.
+              </p>
+            </div>
+            <ChevronDown
+              size={22}
+              className={`mt-0.5 shrink-0 text-emerald-800 transition-transform duration-300 dark:text-emerald-200 ${ownerPlSectionOpen ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+          </button>
+        ) : (
+          <>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900 dark:text-emerald-200/90">
+              Ringkasan P&amp;L (filter lokasi/unit)
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-[#5d7349] dark:text-[#b8cfa8]">
+              P&amp;L kos memakai pemasukan sewa kamar dikurangi pengeluaran kos; P&amp;L manajemen memakai pemasukan di
+              luar sewa dikurangi pengeluaran manajemen — sama seperti halaman Laporan.
+            </p>
+          </>
+        )}
+        {(!isOwnerRole || ownerPlSectionOpen) ? (
+          <div
+            className={`mt-3 grid grid-cols-1 gap-2.5 sm:gap-3 ${isOwnerRole ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-4"}`}
+          >
+            <div className="min-w-0 break-words rounded-2xl border border-emerald-200/70 bg-white/90 px-3 py-2.5 dark:border-emerald-900/45 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#647856] dark:text-[#aabf9e] sm:text-[10px] sm:tracking-[0.14em]">
+                P&amp;L kos
+              </p>
+              <p className="mt-1 text-lg font-semibold tabular-nums leading-tight text-emerald-900 dark:text-emerald-100 sm:text-xl">
+                Rp {dashboardPlBreakdown.plKosNominal.toLocaleString("id-ID")}
+              </p>
+              <p className="mt-1 text-[9px] leading-snug text-[#647856] dark:text-[#aabf9e] sm:text-[10px]">
+                Masuk kos Rp {dashboardPlBreakdown.pemasukanKosTotal.toLocaleString("id-ID")} − keluar kos Rp{" "}
+                {dashboardPlBreakdown.pengeluaranKosTotal.toLocaleString("id-ID")}
+              </p>
+            </div>
+            {!isOwnerRole ? (
+              <div className="min-w-0 break-words rounded-2xl border border-teal-200/70 bg-white/90 px-3 py-2.5 dark:border-teal-900/45 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#4d6d66] dark:text-[#9ec4bc] sm:text-[10px] sm:tracking-[0.14em]">
+                  P&amp;L manajemen
+                </p>
+                <p className="mt-1 text-lg font-semibold tabular-nums leading-tight text-teal-900 dark:text-teal-100 sm:text-xl">
+                  Rp {dashboardPlBreakdown.plManajemenNominal.toLocaleString("id-ID")}
+                </p>
+                <p className="mt-1 text-[9px] leading-snug text-[#4d6d66] dark:text-[#9ec4bc] sm:text-[10px]">
+                  Masuk manajemen Rp {dashboardPlBreakdown.pemasukanManajemenTotal.toLocaleString("id-ID")} − keluar
+                  manajemen Rp {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
                 </p>
               </div>
-              <p className="mt-3 text-2xl font-semibold text-[#2e2318] dark:text-[#f7e9d5]">
-                {item.value}
+            ) : null}
+            <div className="min-w-0 break-words rounded-2xl border border-slate-200/80 bg-white/90 px-3 py-2.5 dark:border-slate-700/60 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px] sm:tracking-[0.14em]">
+                {isOwnerRole ? "Pengeluaran kos" : "Gabungan pengeluaran"}
               </p>
-              <p className="mt-2 text-xs text-[#7d6042] dark:text-[#b79875]">{item.note}</p>
-            </article>
-          ))}
+              <p className="mt-1 text-[13px] font-semibold tabular-nums leading-tight tracking-tight text-[#2e2318] dark:text-[#f0e6d8] sm:text-sm">
+                Rp {dashboardPlBreakdown.pengeluaranTotal.toLocaleString("id-ID")}
+              </p>
+              <p className="mt-1 text-[9px] leading-snug text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px]">
+                {isOwnerRole ? (
+                  <>Hanya pengeluaran dengan lingkup kos · bulan {ownerPnlMonth}</>
+                ) : (
+                  <>
+                    Kos Rp {dashboardPlBreakdown.pengeluaranKosTotal.toLocaleString("id-ID")} · Manaj. Rp{" "}
+                    {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
+                  </>
+                )}
+              </p>
+            </div>
+            <div className="min-w-0 break-words rounded-2xl border border-slate-200/80 bg-white/90 px-3 py-2.5 dark:border-slate-700/60 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px] sm:tracking-[0.14em]">
+                {isOwnerRole ? "Pemasukan kos (sewa kamar)" : "Total pemasukan (laporan)"}
+              </p>
+              <p className="mt-1 text-[13px] font-semibold tabular-nums leading-tight tracking-tight text-[#2e2318] dark:text-[#f0e6d8] sm:text-sm">
+                Rp {dashboardPlBreakdown.pemasukanTotal.toLocaleString("id-ID")}
+              </p>
+              <p className="mt-1 text-[9px] leading-snug text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px]">
+                {isOwnerRole ? (
+                  <>Hanya POS pemasukan yang dihitung sebagai kos (Sewa kamar) · bulan {ownerPnlMonth}</>
+                ) : (
+                  <>Sewa + margin (seluruh POS pemasukan pada filter)</>
+                )}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 rounded-xl border border-emerald-200/60 bg-emerald-50/50 px-3 py-2 text-[11px] text-emerald-900/90 dark:border-emerald-800/50 dark:bg-emerald-950/25 dark:text-emerald-100/90">
+            Ringkasan angka disembunyikan. Ketuk judul &quot;Ringkasan P&amp;L&quot; di atas untuk menampilkan kembali.
+          </p>
+        )}
+      </section>
+      </div>
+      ) : null}
+
+      {showOwnerPenghuniSection ? (
+      <section className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 dark:border-amber-800/40 dark:bg-amber-950/25 sm:rounded-[1.5rem] sm:p-4">
+        <div className="flex flex-col gap-2 min-[380px]:flex-row min-[380px]:flex-wrap min-[380px]:items-center">
+          <div className="flex flex-wrap items-center gap-2">
+            <ClipboardList size={16} className={`shrink-0 ${iconTone.warning}`} />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8f6a2d] dark:text-[#dcb97a] sm:text-xs sm:tracking-[0.18em]">
+              Calon survey
+            </p>
+            <span className="rounded-full border border-amber-300/80 bg-white/90 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 sm:text-sm">
+              {surveyDashboardRows.length}
+            </span>
+          </div>
+          <span className="text-[11px] leading-snug text-[#7d6042] dark:text-[#bfa27f] min-[380px]:ml-auto sm:text-xs">
+            sesuai filter · detail di tabel bawah
+          </span>
         </div>
       </section>
+      ) : null}
 
-      <section className="space-y-5">
-        <article className="rounded-[1.8rem] border border-[#d6ddff] bg-white/90 p-5 dark:border-[#4f5b99] dark:bg-[#1a2144]/95">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      {!isOwnerRole || showOwnerPenghuniSection || showOwnerFinanceDetail ? (
+      <section className="space-y-4 sm:space-y-5 md:space-y-6">
+        {showOwnerPenghuniSection ? (
+        <article
+          id="dashboard-owner-operational"
+          className={`min-w-0 scroll-mt-[4.75rem] rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:scroll-mt-24 sm:rounded-[1.8rem] sm:p-5 ${isOwnerRole ? "ring-1 ring-[#dac3a5]/55 dark:ring-[#56422e]/55" : ""}`}
+        >
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <SectionTitleWithIcon
               icon={BedDouble}
               title="Data Penghuni Kos"
@@ -949,7 +1501,7 @@ export default function DashboardPage() {
             <select
               value={penghuniListFilter}
               onChange={(event) => setPenghuniListFilter(event.target.value as PenghuniListFilter)}
-              className="max-w-[min(100%,22rem)] rounded-full border border-[#dac3a5] bg-[#fdf9f2] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6e5336] outline-none ring-[#bb986e] focus:ring-2 dark:border-[#56422e] dark:bg-[#2a2016] dark:text-[#d9bc95] sm:text-xs sm:tracking-[0.12em]"
+              className="min-h-[2.75rem] w-full max-w-none rounded-full border border-[#dac3a5] bg-[#fdf9f2] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6e5336] outline-none ring-[#bb986e] focus:ring-2 dark:border-[#56422e] dark:bg-[#2a2016] dark:text-[#d9bc95] sm:w-auto sm:max-w-[min(100%,22rem)] sm:text-xs sm:tracking-[0.12em]"
               aria-label="Filter daftar penghuni"
             >
               {PENGHUNI_LIST_FILTER_OPTIONS.map((opt) => (
@@ -960,7 +1512,7 @@ export default function DashboardPage() {
             </select>
           </div>
 
-          {localDemoMode && checkoutNoticeEntries.length > 0 ? (
+          {checkoutNoticeEntries.length > 0 ? (
             <div
               className="mb-5 rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/95 to-[#fffdf9] p-4 dark:border-amber-800/50 dark:from-[#2a2215] dark:to-[#20170f]/95"
               role="region"
@@ -1002,19 +1554,95 @@ export default function DashboardPage() {
             </div>
           ) : null}
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+          <div className="space-y-3 md:hidden">
+            {displayPenghuni.map((row) => (
+              <div
+                key={row.id}
+                className="rounded-xl border border-[#ecdcc6]/90 bg-gradient-to-b from-white/95 to-[#fffdf9]/90 p-3 shadow-sm dark:border-[#3f3023] dark:from-[#1a2144]/95 dark:to-[#151a36]/95"
+              >
+                <div className="flex items-start justify-between gap-2 border-b border-[#ecdcc6]/60 pb-2.5 dark:border-[#3a467f]/55">
+                  <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">
+                    {row.nama}
+                  </p>
+                  <span className="shrink-0">
+                    <StatusBadge status={row.status} />
+                  </span>
+                </div>
+                <dl className="mt-2.5 space-y-2 text-xs">
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Unit
+                    </dt>
+                    <dd className="min-w-0 text-right font-medium text-[#2d2217] dark:text-[#e8dcc8]">{row.unit}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Check in
+                    </dt>
+                    <dd className="tabular-nums text-[#2d2217] dark:text-[#f6e9d5]">{row.checkIn}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      {penghuniListFilter === "booking" ? "Booking fee" : "Check out"}
+                    </dt>
+                    <dd className="min-w-0 text-right tabular-nums text-[#2d2217] dark:text-[#f6e9d5]">
+                      {penghuniListFilter === "booking" ? row.bookingFeeFormatted : row.checkOut}
+                    </dd>
+                  </div>
+                  {penghuniListFilter !== "booking" ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                        Sisa hari
+                      </dt>
+                      <dd className="shrink-0">
+                        <span
+                          className={`inline-block rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${sisaHariBadgeClass(row.daysUntilCheckout)}`}
+                        >
+                          {sisaHariLabel(row.daysUntilCheckout)}
+                        </span>
+                      </dd>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between gap-3 pt-0.5">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Tagihan
+                    </dt>
+                    <dd className="font-semibold text-[#2d2217] dark:text-[#f6e9d5]">{row.tagihan}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+            {displayPenghuni.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[#dbc6a8]/90 bg-[#fdf9f2]/55 px-3 py-4 text-center text-xs leading-relaxed text-[#7d6042] dark:border-[#56422e] dark:bg-[#2a2016]/35 dark:text-[#bfa27f]">
+                {isOwnerRole
+                  ? "Belum ada penghuni atau tidak cocok filter lokasi/unit Anda (cek juga akses blok di Master)."
+                  : penghuniListFilter === "checkoutLewat"
+                    ? "Tidak ada penghuni dengan tanggal check-out sudah lewat untuk filter ini."
+                    : penghuniListFilter === "hampir7"
+                      ? "Tidak ada penghuni dengan checkout dalam 1–7 hari (H-1 s/d H-7) untuk filter ini."
+                      : penghuniListFilter === "telatBayar"
+                        ? "Tidak ada penghuni dengan tanggal check-out yang sudah lewat untuk filter ini."
+                        : penghuniListFilter === "booking"
+                          ? "Tidak ada penghuni dengan status Booking untuk filter ini."
+                          : "Belum ada penghuni atau tidak cocok filter lokasi/unit."}
+              </p>
+            ) : null}
+          </div>
+          <div className="hidden md:block md:overflow-x-auto">
+            <table className="w-full min-w-[44rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
-                  <th className="px-3 py-3">Nama</th>
-                  <th className="px-3 py-3">Unit</th>
-                  <th className="px-3 py-3">Status Kamar</th>
-                  <th className="px-3 py-3">Check In</th>
-                  <th className="px-3 py-3">{penghuniListFilter === "booking" ? "Booking Fee" : "Check Out"}</th>
+                  <th className="whitespace-nowrap px-3 py-3">Nama</th>
+                  <th className="whitespace-nowrap px-3 py-3">Unit</th>
+                  <th className="whitespace-nowrap px-3 py-3">Status Kamar</th>
+                  <th className="whitespace-nowrap px-3 py-3">Check In</th>
+                  <th className="whitespace-nowrap px-3 py-3">
+                    {penghuniListFilter === "booking" ? "Booking Fee" : "Check Out"}
+                  </th>
                   {penghuniListFilter !== "booking" ? (
-                    <th className="px-3 py-3">SISA HARI</th>
+                    <th className="whitespace-nowrap px-3 py-3">SISA HARI</th>
                   ) : null}
-                  <th className="px-3 py-3">Tagihan</th>
+                  <th className="whitespace-nowrap px-3 py-3">Tagihan</th>
                 </tr>
               </thead>
               <tbody>
@@ -1024,12 +1652,12 @@ export default function DashboardPage() {
                     className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
                   >
                     <td className="px-3 py-3">{row.nama}</td>
-                    <td className="px-3 py-3">{row.unit}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{row.unit}</td>
                     <td className="px-3 py-3">
                       <StatusBadge status={row.status} />
                     </td>
-                    <td className="px-3 py-3">{row.checkIn}</td>
-                    <td className="px-3 py-3">
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.checkIn}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">
                       {penghuniListFilter === "booking" ? row.bookingFeeFormatted : row.checkOut}
                     </td>
                     {penghuniListFilter !== "booking" ? (
@@ -1041,16 +1669,18 @@ export default function DashboardPage() {
                         </span>
                       </td>
                     ) : null}
-                    <td className="px-3 py-3">{row.tagihan}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{row.tagihan}</td>
                   </tr>
                 ))}
                 {displayPenghuni.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-[#7d6042]" colSpan={penghuniListFilter === "booking" ? 6 : 7}>
-                      {localDemoMode
-                        ? isOwnerRole
-                          ? `Tidak ada data penghuni untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : penghuniListFilter === "checkoutLewat"
+                    <td
+                      className="px-3 py-3 text-sm leading-relaxed text-[#7d6042]"
+                      colSpan={penghuniListFilter === "booking" ? 6 : 7}
+                    >
+                      {isOwnerRole
+                        ? "Belum ada penghuni atau tidak cocok filter lokasi/unit Anda (cek juga akses blok di Master)."
+                        : penghuniListFilter === "checkoutLewat"
                           ? "Tidak ada penghuni dengan tanggal check-out sudah lewat untuk filter ini."
                           : penghuniListFilter === "hampir7"
                             ? "Tidak ada penghuni dengan checkout dalam 1–7 hari (H-1 s/d H-7) untuk filter ini."
@@ -1058,8 +1688,7 @@ export default function DashboardPage() {
                               ? "Tidak ada penghuni dengan tanggal check-out yang sudah lewat untuk filter ini."
                               : penghuniListFilter === "booking"
                                 ? "Tidak ada penghuni dengan status Booking untuk filter ini."
-                                : "Belum ada penghuni atau tidak cocok filter lokasi/unit."
-                        : "Belum ada data penghuni."}
+                                : "Belum ada penghuni atau tidak cocok filter lokasi/unit."}
                     </td>
                   </tr>
                 ) : null}
@@ -1067,13 +1696,15 @@ export default function DashboardPage() {
             </table>
           </div>
           <div className="mt-3 flex justify-end">
-            <span className="rounded-full border border-[#dbc6a8] bg-[#f6ecde] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#7a5c3a] dark:border-[#4b3928] dark:bg-[#2b2016] dark:text-[#d2b58f]">
+            <span className="rounded-full border border-[#dbc6a8] bg-[#f6ecde] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7a5c3a] dark:border-[#4b3928] dark:bg-[#2b2016] dark:text-[#d2b58f] sm:tracking-[0.16em]">
               Total: {displayPenghuni.length}
             </span>
           </div>
         </article>
+        ) : null}
 
-        <article className="rounded-[1.8rem] border border-violet-200/80 bg-gradient-to-br from-[#f3f1ff]/90 to-white/95 p-5 dark:border-[#4f5b99] dark:from-[#1f2344] dark:to-[#1a2144]/95">
+        {showOwnerPenghuniSection ? (
+        <article className="min-w-0 rounded-2xl border border-violet-200/80 bg-gradient-to-br from-[#f3f1ff]/90 to-white/95 p-4 dark:border-[#4f5b99] dark:from-[#1f2344] dark:to-[#1a2144]/95 sm:rounded-[1.8rem] sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <SectionTitleWithIcon
               icon={ClipboardList}
@@ -1082,18 +1713,65 @@ export default function DashboardPage() {
               iconClassName={iconTone.warning}
             />
           </div>
-          <p className="mb-3 text-xs text-[#7d6042] dark:text-[#bfa27f]">
+          <p className="mb-3 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#bfa27f] sm:text-xs">
             Data dari form Survey Baru di halaman Penghuni; urut berdasarkan rencana check-in; mengikuti filter lokasi/unit di atas.
           </p>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+          <div className="space-y-3 md:hidden">
+            {surveyDashboardRows.map((row) => (
+              <div
+                key={row.id}
+                className="rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white/95 p-3 shadow-sm dark:border-amber-800/35 dark:from-[#2a2215]/95 dark:to-[#1f2344]/95"
+              >
+                <p className="text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">{row.namaLengkap}</p>
+                <dl className="mt-2.5 space-y-2 border-t border-amber-200/50 pt-2.5 text-xs dark:border-amber-800/35">
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f6a2d] dark:text-[#dcb97a]">
+                      Unit
+                    </dt>
+                    <dd className="text-right font-medium text-[#2d2217] dark:text-[#e8dcc8]">{row.unitBlok}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f6a2d] dark:text-[#dcb97a]">
+                      Rencana check-in
+                    </dt>
+                    <dd className="tabular-nums text-[#2d2217] dark:text-[#f6e9d5]">{row.rencanaCheckIn || "—"}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f6a2d] dark:text-[#dcb97a]">
+                      Negosiasi
+                    </dt>
+                    <dd className="text-right font-medium tabular-nums text-[#2d2217] dark:text-[#f6e9d5]">
+                      {row.negosiasiHarga ? `Rp ${row.negosiasiHarga}` : "—"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f6a2d] dark:text-[#dcb97a]">
+                      WA
+                    </dt>
+                    <dd className="min-w-0 break-all text-right font-medium text-[#2d2217] dark:text-[#f6e9d5]">
+                      {row.noWa || "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+            {surveyDashboardRows.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-amber-300/80 bg-amber-50/40 px-3 py-4 text-center text-xs leading-relaxed text-[#7d6042] dark:border-amber-800/50 dark:bg-amber-950/25 dark:text-[#dcb97a]">
+                {isOwnerRole
+                  ? "Belum ada survey atau tidak cocok filter lokasi/unit Anda."
+                  : "Belum ada survey atau tidak cocok filter lokasi/unit."}
+              </p>
+            ) : null}
+          </div>
+          <div className="hidden md:block md:overflow-x-auto">
+            <table className="w-full min-w-[40rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-amber-200/90 text-xs uppercase tracking-[0.18em] text-[#8f6a2d] dark:border-[#4a3a22] dark:text-[#dcb97a]">
-                  <th className="px-3 py-3">Nama</th>
-                  <th className="px-3 py-3">Unit</th>
-                  <th className="px-3 py-3">Rencana check-in</th>
-                  <th className="px-3 py-3">Negosiasi</th>
-                  <th className="px-3 py-3">WA</th>
+                  <th className="whitespace-nowrap px-3 py-3">Nama</th>
+                  <th className="whitespace-nowrap px-3 py-3">Unit</th>
+                  <th className="whitespace-nowrap px-3 py-3">Rencana check-in</th>
+                  <th className="whitespace-nowrap px-3 py-3">Negosiasi</th>
+                  <th className="whitespace-nowrap px-3 py-3">WA</th>
                 </tr>
               </thead>
               <tbody>
@@ -1103,22 +1781,20 @@ export default function DashboardPage() {
                     className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
                   >
                     <td className="px-3 py-3">{row.namaLengkap}</td>
-                    <td className="px-3 py-3">{row.unitBlok}</td>
-                    <td className="px-3 py-3">{row.rencanaCheckIn || "—"}</td>
-                    <td className="px-3 py-3">
+                    <td className="whitespace-nowrap px-3 py-3">{row.unitBlok}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.rencanaCheckIn || "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">
                       {row.negosiasiHarga ? `Rp ${row.negosiasiHarga}` : "—"}
                     </td>
-                    <td className="px-3 py-3">{row.noWa || "—"}</td>
+                    <td className="max-w-[12rem] break-all px-3 py-3">{row.noWa || "—"}</td>
                   </tr>
                 ))}
                 {surveyDashboardRows.length === 0 ? (
                   <tr>
                     <td className="px-3 py-3 text-sm text-[#7d6042]" colSpan={5}>
-                      {localDemoMode
-                        ? isOwnerRole
-                          ? `Tidak ada data survey untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : "Belum ada survey atau tidak cocok filter lokasi/unit."
-                        : "Belum ada data survey."}
+                      {isOwnerRole
+                        ? "Belum ada survey atau tidak cocok filter lokasi/unit Anda."
+                        : "Belum ada survey atau tidak cocok filter lokasi/unit."}
                     </td>
                   </tr>
                 ) : null}
@@ -1131,22 +1807,71 @@ export default function DashboardPage() {
             </span>
           </div>
         </article>
+        ) : null}
 
-        <article className="rounded-[1.8rem] border border-[#d6ddff] bg-white/90 p-5 dark:border-[#4f5b99] dark:bg-[#1a2144]/95">
+        {showOwnerFinanceDetail ? (
+        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.8rem] sm:p-5">
           <SectionTitleWithIcon
             icon={AlertTriangle}
             title="Tabel Pengeluaran"
-            className="mb-4 text-[#2d2217] dark:text-[#f6e9d5]"
+            className="mb-3 text-[#2d2217] dark:text-[#f6e9d5] sm:mb-4"
             iconClassName={iconTone.warning}
           />
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+          <div className="space-y-3 md:hidden">
+            {displayPengeluaran.map((row) => (
+              <div
+                key={row.id}
+                className="rounded-xl border border-rose-200/75 bg-gradient-to-b from-white/95 to-rose-50/30 p-3 shadow-sm dark:border-rose-900/35 dark:from-[#1a2144]/98 dark:to-[#281820]/95"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">
+                    {row.kategori}
+                  </p>
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-rose-800 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                    {row.status}
+                  </span>
+                </div>
+                <dl className="mt-2.5 space-y-2 border-t border-rose-200/55 pt-2.5 text-xs dark:border-rose-900/30">
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Lingkup P&amp;L
+                    </dt>
+                    <dd className="text-right font-medium text-[#6e5336] dark:text-[#bfa27f]">{row.lingkup}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Tanggal
+                    </dt>
+                    <dd className="tabular-nums text-[#2d2217] dark:text-[#f6e9d5]">{row.tanggal}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3 pt-0.5">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Nominal
+                    </dt>
+                    <dd className="text-right text-sm font-semibold tabular-nums text-rose-900 dark:text-rose-100">
+                      {row.nominal}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+            {displayPengeluaran.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-rose-200/90 bg-rose-50/40 px-3 py-4 text-center text-xs leading-relaxed text-[#7d6042] dark:border-rose-900/45 dark:bg-rose-950/25 dark:text-[#eab4b4]">
+                {isOwnerRole
+                  ? `Tidak ada pengeluaran kos untuk P&L ${ownerPnlMonth} pada filter ini (pengeluaran manajemen tidak ditampilkan).`
+                  : "Belum ada pengeluaran atau tidak cocok filter."}
+              </p>
+            ) : null}
+          </div>
+          <div className="hidden md:block md:overflow-x-auto">
+            <table className="w-full min-w-[46rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
-                  <th className="px-3 py-3">Kategori</th>
-                  <th className="px-3 py-3">Tanggal</th>
-                  <th className="px-3 py-3">Nominal</th>
-                  <th className="px-3 py-3">Status</th>
+                  <th className="whitespace-nowrap px-3 py-3">Kategori</th>
+                  <th className="whitespace-nowrap px-3 py-3">Lingkup P&amp;L</th>
+                  <th className="whitespace-nowrap px-3 py-3">Tanggal</th>
+                  <th className="whitespace-nowrap px-3 py-3">Nominal</th>
+                  <th className="whitespace-nowrap px-3 py-3">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -1155,9 +1880,10 @@ export default function DashboardPage() {
                     key={row.id}
                     className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
                   >
-                    <td className="px-3 py-3">{row.kategori}</td>
-                    <td className="px-3 py-3">{row.tanggal}</td>
-                    <td className="px-3 py-3">{row.nominal}</td>
+                    <td className="max-w-[14rem] px-3 py-3">{row.kategori}</td>
+                    <td className="whitespace-nowrap px-3 py-3 text-[#6e5336] dark:text-[#bfa27f]">{row.lingkup}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.tanggal}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums font-medium">{row.nominal}</td>
                     <td className="px-3 py-3">
                       <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-rose-800 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
                         {row.status}
@@ -1167,40 +1893,90 @@ export default function DashboardPage() {
                 ))}
                 {displayPengeluaran.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-[#7d6042]" colSpan={4}>
-                      {localDemoMode
-                        ? isOwnerRole
-                          ? `Tidak ada data pengeluaran untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : "Belum ada pengeluaran atau tidak cocok filter."
-                        : "Belum ada data pengeluaran."}
+                    <td className="px-3 py-3 text-sm leading-relaxed text-[#7d6042]" colSpan={5}>
+                      {isOwnerRole
+                        ? `Tidak ada pengeluaran kos untuk P&L ${ownerPnlMonth} pada filter ini (pengeluaran manajemen tidak ditampilkan).`
+                        : "Belum ada pengeluaran atau tidak cocok filter."}
                     </td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </div>
-          <div className="mt-3 flex justify-end">
-            <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-rose-900 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-100">
+          <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            {!isOwnerRole ? (
+              <span className="inline-flex min-h-[2.5rem] items-center justify-center rounded-full border border-rose-200 bg-rose-50/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100 sm:min-h-0 sm:tracking-[0.12em]">
+                Kos Rp {displayPengeluaranSplit.kos.toLocaleString("id-ID")} · Manajemen Rp{" "}
+                {displayPengeluaranSplit.manajemen.toLocaleString("id-ID")}
+              </span>
+            ) : (
+              <span className="inline-flex min-h-[2.5rem] items-center justify-center rounded-full border border-rose-200 bg-rose-50/90 px-3 py-1.5 text-center text-[10px] font-semibold uppercase leading-snug tracking-[0.1em] text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100 sm:min-h-0 sm:tracking-[0.12em]">
+                Pengeluaran kos Rp {displayPengeluaranSplit.kos.toLocaleString("id-ID")}
+              </span>
+            )}
+            <span className="inline-flex min-h-[2.5rem] w-full items-center justify-center rounded-full border border-rose-300 bg-rose-50 px-3 py-2 text-center text-[11px] font-bold uppercase leading-snug tracking-[0.1em] text-rose-900 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-100 sm:min-h-0 sm:w-auto sm:py-1 sm:text-xs sm:tracking-[0.14em]">
               Total pengeluaran: Rp {totalPengeluaranNominal.toLocaleString("id-ID")}
             </span>
           </div>
         </article>
+        ) : null}
 
-        <article className="rounded-[1.8rem] border border-[#d6ddff] bg-white/90 p-5 dark:border-[#4f5b99] dark:bg-[#1a2144]/95">
+        {showOwnerFinanceDetail ? (
+        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.8rem] sm:p-5">
           <SectionTitleWithIcon
             icon={BadgeDollarSign}
             title="Tabel Pemasukan"
-            className="mb-4 text-[#2d2217] dark:text-[#f6e9d5]"
+            className="mb-3 text-[#2d2217] dark:text-[#f6e9d5] sm:mb-4"
             iconClassName={iconTone.success}
           />
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+          <div className="space-y-3 md:hidden">
+            {displayPemasukan.map((row) => (
+              <div
+                key={row.id}
+                className="rounded-xl border border-emerald-200/80 bg-gradient-to-b from-white/95 to-emerald-50/35 p-3 shadow-sm dark:border-emerald-900/35 dark:from-[#1a2144]/98 dark:to-[#14261c]/95"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">
+                    {row.sumber}
+                  </p>
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
+                    {row.status}
+                  </span>
+                </div>
+                <dl className="mt-2.5 space-y-2 border-t border-emerald-200/50 pt-2.5 text-xs dark:border-emerald-900/35">
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Tanggal
+                    </dt>
+                    <dd className="tabular-nums text-[#2d2217] dark:text-[#f6e9d5]">{row.tanggal}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3 pt-0.5">
+                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                      Nominal
+                    </dt>
+                    <dd className="text-right text-sm font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
+                      {row.nominal}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+            {displayPemasukan.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-emerald-200/90 bg-emerald-50/40 px-3 py-4 text-center text-xs leading-relaxed text-[#7d6042] dark:border-emerald-900/45 dark:bg-emerald-950/25 dark:text-[#a8d4bc]">
+                {isOwnerRole
+                  ? `Tidak ada pemasukan kos (Sewa kamar) untuk P&L ${ownerPnlMonth} pada filter ini (pemasukan manajemen tidak ditampilkan).`
+                  : "Belum ada pemasukan atau tidak cocok filter."}
+              </p>
+            ) : null}
+          </div>
+          <div className="hidden md:block md:overflow-x-auto">
+            <table className="w-full min-w-[38rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
-                  <th className="px-3 py-3">Sumber</th>
-                  <th className="px-3 py-3">Tanggal</th>
-                  <th className="px-3 py-3">Nominal</th>
-                  <th className="px-3 py-3">Status</th>
+                  <th className="whitespace-nowrap px-3 py-3">Sumber</th>
+                  <th className="whitespace-nowrap px-3 py-3">Tanggal</th>
+                  <th className="whitespace-nowrap px-3 py-3">Nominal</th>
+                  <th className="whitespace-nowrap px-3 py-3">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -1209,9 +1985,9 @@ export default function DashboardPage() {
                     key={row.id}
                     className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
                   >
-                    <td className="px-3 py-3">{row.sumber}</td>
-                    <td className="px-3 py-3">{row.tanggal}</td>
-                    <td className="px-3 py-3">{row.nominal}</td>
+                    <td className="max-w-[16rem] px-3 py-3">{row.sumber}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.tanggal}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums font-medium">{row.nominal}</td>
                     <td className="px-3 py-3">
                       <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
                         {row.status}
@@ -1221,25 +1997,25 @@ export default function DashboardPage() {
                 ))}
                 {displayPemasukan.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-[#7d6042]" colSpan={4}>
-                      {localDemoMode
-                        ? isOwnerRole
-                          ? `Tidak ada data pemasukan untuk P&L ${ownerPnlMonth} pada filter ini.`
-                          : "Belum ada pemasukan atau tidak cocok filter."
-                        : "Belum ada data pemasukan."}
+                    <td className="px-3 py-3 text-sm leading-relaxed text-[#7d6042]" colSpan={4}>
+                      {isOwnerRole
+                        ? `Tidak ada pemasukan kos (Sewa kamar) untuk P&L ${ownerPnlMonth} pada filter ini (pemasukan manajemen tidak ditampilkan).`
+                        : "Belum ada pemasukan atau tidak cocok filter."}
                     </td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </div>
-          <div className="mt-3 flex justify-end">
-            <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100">
+          <div className="mt-3 flex justify-stretch sm:justify-end">
+            <span className="inline-flex min-h-[2.5rem] w-full items-center justify-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-2 text-center text-[11px] font-bold uppercase leading-snug tracking-[0.1em] text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100 sm:min-h-0 sm:w-auto sm:py-1 sm:text-xs sm:tracking-[0.14em]">
               Total pemasukan: Rp {totalPemasukanNominal.toLocaleString("id-ID")}
             </span>
           </div>
         </article>
+        ) : null}
       </section>
+      ) : null}
     </div>
   );
 }

@@ -2,7 +2,17 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/libsupabaseClient";
-import { Building2, HandCoins, Pencil, RefreshCcw, Save, Settings2, Trash2, Users } from "lucide-react";
+import {
+  Building2,
+  HandCoins,
+  History,
+  Pencil,
+  RefreshCcw,
+  Save,
+  Settings2,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
@@ -12,15 +22,89 @@ import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY, newSandboxId } from "@/lib/sandbox-storage";
 import { readDemoProfileSession } from "@/lib/demo-auth";
+import { normalizeUserProfileRole } from "@/lib/user-profile-role";
+import { loginDisplayPrimary } from "@/lib/internal-auth-email";
+import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
+import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
+import type { PengeluaranScope } from "@/lib/pengeluaran-scope";
+import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
+import { FINANCE_POS_SEWA_KAMAR } from "@/lib/penghuni-finance-payment-sync";
+import {
+  pageFieldClass,
+  pageLabelClass,
+  pageSectionClass,
+  pageTabStripClass,
+} from "@/lib/ui-page-layout";
 
 type MasterTab = "finance" | "lokasi" | "user";
 export type UserRole = "super_admin" | "owner" | "staff" | "supervisor" | "manager";
-type FinanceType = "Pemasukan" | "Pengeluaran";
+type FinanceType =
+  | "Pemasukan kos"
+  | "Pemasukan manajemen"
+  | "Pengeluaran kos"
+  | "Pengeluaran manajemen";
+
+function isPengeluaranTipe(tipe: FinanceType): boolean {
+  return tipe.startsWith("Pengeluaran");
+}
+
+function pengeluaranScopeForFinanceTipe(tipe: FinanceType): PengeluaranScope | null {
+  if (!isPengeluaranTipe(tipe)) return null;
+  return tipe.includes("manajemen") ? "manajemen" : "kos";
+}
+
+function isPemasukanTipe(tipe: FinanceType): boolean {
+  return tipe.startsWith("Pemasukan");
+}
+
+type PemasukanScope = "kos" | "manajemen";
+type PemasukanKind = "sewa_kamar" | "booking_fee" | "lain";
+
+function classifyPemasukanKindByPos(namaPosRaw: unknown): PemasukanKind {
+  const pos = String(namaPosRaw ?? "").trim().toLowerCase();
+  if (pos === FINANCE_POS_SEWA_KAMAR.trim().toLowerCase()) return "sewa_kamar";
+  if (pos === "booking fee") return "booking_fee";
+  return "lain";
+}
+
+function pemasukanScopeForFinanceTipe(tipe: FinanceType): PemasukanScope | null {
+  if (!isPemasukanTipe(tipe)) return null;
+  return tipe.includes("manajemen") ? "manajemen" : "kos";
+}
+
+function pemasukanKindForFinanceTipe(tipe: FinanceType): PemasukanKind | null {
+  if (!isPemasukanTipe(tipe)) return null;
+  if (tipe.includes("kos")) return "sewa_kamar";
+  return "lain";
+}
+
+function normalizeFinanceTipe(raw: unknown, scopeRaw: unknown, namaPosRaw: unknown): FinanceType {
+  const t = String(raw ?? "").trim().toLowerCase();
+  if (t === "pemasukan manajemen") return "Pemasukan manajemen";
+  if (t === "pemasukan kos") return "Pemasukan kos";
+  if (t === "pemasukan") {
+    // Backward compat: data lama "Pemasukan" dibagi berdasar nama POS.
+    const kind = classifyPemasukanKindByPos(namaPosRaw);
+    if (kind === "sewa_kamar" || kind === "booking_fee") return "Pemasukan kos";
+    return "Pemasukan manajemen";
+  }
+  if (t === "pengeluaran manajemen") return "Pengeluaran manajemen";
+  if (t === "pengeluaran kos") return "Pengeluaran kos";
+  if (t === "pengeluaran") {
+    const sp = normalizePengeluaranScope(scopeRaw);
+    return sp === "manajemen" ? "Pengeluaran manajemen" : "Pengeluaran kos";
+  }
+  if (t.startsWith("pengeluaran")) return "Pengeluaran kos";
+  if (t.startsWith("pemasukan")) return "Pemasukan manajemen";
+  return "Pemasukan manajemen";
+}
 
 export type FinanceKategoriRow = {
   id: string;
   tipe: FinanceType;
   namaPos: string;
+  /** Hanya untuk tipe Pengeluaran — membagi P&L kos vs manajemen. */
+  pengeluaranScope?: PengeluaranScope;
 };
 
 export type LokasiRow = {
@@ -38,12 +122,23 @@ export type UserProfileRow = {
   id: string;
   nama: string;
   email: string;
+  /** Untuk akun baru: login pendek di Supabase Auth disimpan sebagai email sintesis `username@{domain}` */
+  username?: string;
   noHp: string;
   role: UserRole;
   aksesLokasi: string[];
   aksesBlok: string[];
   /** Khusus demo lokal agar akun master user dapat dipakai login demo. */
   demoPassword?: string;
+};
+
+export type PasswordChangeLogRow = {
+  id: string;
+  subjectUserId: string;
+  actorUserId: string | null;
+  source: string;
+  detail: string;
+  createdAt: string;
 };
 
 type MasterSandboxBlob = {
@@ -89,6 +184,8 @@ export default function MasterPageClient({
   initialBlok: BlokRow[];
   initialUsers: UserProfileRow[];
 }) {
+  const sessionHydrated = useSupabaseSessionHydrated();
+  const cloudSyncTick = useCloudDataResyncTick();
   const { localDemoMode } = useSandboxMode();
   const { toast, confirm } = useAppFeedback();
   const [activeTab, setActiveTab] = useState<MasterTab>("finance");
@@ -96,9 +193,15 @@ export default function MasterPageClient({
   const [lokasiData, setLokasiData] = useState(initialLokasi);
   const [blokData, setBlokData] = useState(initialBlok);
   const [usersData, setUsersData] = useState(initialUsers);
+  const [passwordLogRows, setPasswordLogRows] = useState<PasswordChangeLogRow[]>([]);
 
-  const [financeForm, setFinanceForm] = useState<{ tipe: FinanceType; namaPos: string }>({
-    tipe: "Pemasukan",
+  const userNameById = useMemo(() => new Map(usersData.map((u) => [u.id, u.nama])), [usersData]);
+
+  const [financeForm, setFinanceForm] = useState<{
+    tipe: FinanceType;
+    namaPos: string;
+  }>({
+    tipe: "Pemasukan manajemen",
     namaPos: "",
   });
   const [lokasiForm, setLokasiForm] = useState({ namaLokasi: "" });
@@ -115,7 +218,7 @@ export default function MasterPageClient({
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [userForm, setUserForm] = useState({
     nama: "",
-    email: "",
+    username: "",
     noHp: "",
     password: "",
     role: "manager" as UserRole,
@@ -135,26 +238,30 @@ export default function MasterPageClient({
   };
 
   useEffect(() => {
-    if (!localDemoMode) {
-      setFinanceData(initialFinanceKategori);
-      setLokasiData(initialLokasi);
-      setBlokData(initialBlok);
-      setUsersData(initialUsers);
-      setBlokForm((prev) => ({ ...prev, lokasiId: initialLokasi[0]?.id ?? prev.lokasiId }));
-      return;
-    }
+    if (!localDemoMode) return;
     const m = readSandboxJson<MasterSandboxBlob | null>(SB_KEY.master, null);
     if (m) {
       const seeded = withDemoMasterSeed(m);
-      setFinanceData(seeded.financeData);
+      const normalizedFin = seeded.financeData.map((r) => ({
+        ...r,
+        pengeluaranScope:
+          isPengeluaranTipe(r.tipe) ? normalizePengeluaranScope(r.pengeluaranScope) : undefined,
+      }));
+      const finScopeMigrated = seeded.financeData.some(
+        (r, i) =>
+          isPengeluaranTipe(r.tipe) &&
+          normalizedFin[i]?.pengeluaranScope !== r.pengeluaranScope
+      );
+      setFinanceData(normalizedFin);
       setLokasiData(seeded.lokasiData);
       setBlokData(seeded.blokData);
       setUsersData(seeded.usersData);
       if (
         seeded.lokasiData.length !== m.lokasiData.length ||
-        seeded.blokData.length !== m.blokData.length
+        seeded.blokData.length !== m.blokData.length ||
+        finScopeMigrated
       ) {
-        persistMasterFull(seeded.financeData, seeded.lokasiData, seeded.blokData, seeded.usersData);
+        persistMasterFull(normalizedFin, seeded.lokasiData, seeded.blokData, seeded.usersData);
       }
       const firstLok = seeded.lokasiData[0]?.id;
       if (firstLok) {
@@ -167,17 +274,22 @@ export default function MasterPageClient({
         blokData: initialBlok,
         usersData: initialUsers,
       });
-      setFinanceData(seeded.financeData);
+      const normalizedFin = seeded.financeData.map((r) => ({
+        ...r,
+        pengeluaranScope:
+          isPengeluaranTipe(r.tipe) ? normalizePengeluaranScope(r.pengeluaranScope) : undefined,
+      }));
+      setFinanceData(normalizedFin);
       setLokasiData(seeded.lokasiData);
       setBlokData(seeded.blokData);
       setUsersData(seeded.usersData);
-      persistMasterFull(seeded.financeData, seeded.lokasiData, seeded.blokData, seeded.usersData);
+      persistMasterFull(normalizedFin, seeded.lokasiData, seeded.blokData, seeded.usersData);
       setBlokForm((prev) => ({ ...prev, lokasiId: seeded.lokasiData[0]?.id ?? prev.lokasiId }));
     }
   }, [localDemoMode, initialFinanceKategori, initialLokasi, initialBlok, initialUsers]);
 
   const tabBtnClass = (tab: MasterTab) =>
-    `rounded-full px-4 py-2 text-xs font-semibold tracking-[0.14em] transition ${
+    `w-full rounded-full px-4 py-2.5 text-left text-[0.65rem] font-semibold tracking-[0.1em] transition sm:inline-block sm:w-auto sm:py-2 sm:text-center sm:text-xs sm:tracking-[0.14em] ${
       activeTab === tab
         ? "bg-gradient-to-r from-[#60482f] to-[#8f734f] text-[#f8ebd7]"
         : "bg-[#f2e4d0] text-[#6b5236] hover:bg-[#e8d6be] dark:bg-[#2c2117] dark:text-[#d7bb95] dark:hover:bg-[#3a2c1f]"
@@ -192,9 +304,10 @@ export default function MasterPageClient({
     if (localDemoMode) {
       const demo = readDemoProfileSession();
       setCurrentUserId(demo?.id ?? null);
-      setCurrentUserRole((demo?.role ?? "staff") as UserRole);
+      setCurrentUserRole(normalizeUserProfileRole(demo?.role) as UserRole);
       return;
     }
+    if (!sessionHydrated) return;
     void (async () => {
       const {
         data: { user },
@@ -205,13 +318,17 @@ export default function MasterPageClient({
         return;
       }
       const { data } = await supabase.from("user_profiles").select("role").eq("id", user.id).maybeSingle();
-      const role = String((data as Record<string, unknown> | null)?.role ?? "staff").toLowerCase();
-      const allowed = new Set(["super_admin", "owner", "staff", "supervisor", "manager"]);
-      setCurrentUserRole((allowed.has(role) ? role : "staff") as UserRole);
+      const role = normalizeUserProfileRole((data as Record<string, unknown> | null)?.role);
+      setCurrentUserRole(role as UserRole);
     })();
-  }, [localDemoMode]);
+  }, [localDemoMode, sessionHydrated, cloudSyncTick]);
 
   const canManageMaster = currentUserRole === "super_admin" || currentUserRole === "manager";
+  const canSuperAdminMaster = currentUserRole === "super_admin";
+  /** Cloud: pembuatan/penghapusan user dan password → Super Admin API saja */
+  const canMutateMasterUsersCloud = currentUserRole === "super_admin" && !localDemoMode;
+  const canMutateMasterUsersSandbox = localDemoMode && canManageMaster;
+  const canMutateMasterUsers = canMutateMasterUsersCloud || canMutateMasterUsersSandbox;
 
   const userMenuAccessLabel = useMemo(() => {
     if (userForm.role === "owner") return "Dashboard saja";
@@ -224,7 +341,7 @@ export default function MasterPageClient({
     setEditingUserId(null);
     setUserForm({
       nama: "",
-      email: "",
+      username: "",
       noHp: "",
       password: "",
       role: "manager",
@@ -274,9 +391,16 @@ export default function MasterPageClient({
   const refreshAll = async (): Promise<boolean> => {
     setIsLoading(true);
     if (localDemoMode) {
+      setPasswordLogRows([]);
       const m = readSandboxJson<MasterSandboxBlob | null>(SB_KEY.master, null);
       if (m) {
-        setFinanceData(m.financeData);
+        setFinanceData(
+          m.financeData.map((r) => ({
+            ...r,
+            pengeluaranScope:
+              isPengeluaranTipe(r.tipe) ? normalizePengeluaranScope(r.pengeluaranScope) : undefined,
+          }))
+        );
         setLokasiData(m.lokasiData);
         setBlokData(m.blokData);
         setUsersData(m.usersData);
@@ -284,14 +408,20 @@ export default function MasterPageClient({
       setIsLoading(false);
       return true;
     }
-    const [financeRes, lokasiRes, blokRes, usersRes] = await Promise.all([
+    const [financeRes, lokasiRes, blokRes, usersRes, pwdLogRes] = await Promise.all([
       supabase.from("finance_kategori").select("*").order("created_at", { ascending: false }),
       supabase.from("master_lokasi").select("*").order("created_at", { ascending: false }),
       supabase.from("master_blok").select("*").order("created_at", { ascending: false }),
       supabase.from("user_profiles").select("*").order("created_at", { ascending: false }),
+      supabase
+        .from("password_change_log")
+        .select("id, subject_user_id, actor_user_id, source, detail, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100),
     ]);
 
     if (financeRes.error || lokasiRes.error || blokRes.error || usersRes.error) {
+      setPasswordLogRows([]);
       setErrorMessage(
         financeRes.error?.message ||
           lokasiRes.error?.message ||
@@ -303,28 +433,63 @@ export default function MasterPageClient({
       return false;
     }
 
+    if (!pwdLogRes.error && pwdLogRes.data) {
+      setPasswordLogRows(
+        pwdLogRes.data.map((raw) => {
+          const row = raw as Record<string, unknown>;
+          const ca = row.created_at;
+          const created =
+            typeof ca === "string"
+              ? ca
+              : ca && typeof ca === "object" && "toISOString" in (ca as Date)
+                ? (ca as Date).toISOString()
+                : String(ca ?? "");
+          return {
+            id: String(row.id ?? ""),
+            subjectUserId: String(row.subject_user_id ?? ""),
+            actorUserId: row.actor_user_id != null ? String(row.actor_user_id) : null,
+            source: String(row.source ?? ""),
+            detail: String(row.detail ?? ""),
+            createdAt: created,
+          };
+        })
+      );
+    } else {
+      setPasswordLogRows([]);
+    }
+
     setFinanceData(
-      (financeRes.data ?? []).map((row) => ({
-        id: String((row as Record<string, unknown>).id ?? ""),
-        tipe:
-          String((row as Record<string, unknown>).tipe ?? "").toLowerCase() === "pengeluaran"
-            ? "Pengeluaran"
-            : "Pemasukan",
-        namaPos:
-          String((row as Record<string, unknown>).nama_pos ?? "") ||
-          String((row as Record<string, unknown>).pos ?? "") ||
-          String((row as Record<string, unknown>).nama ?? ""),
-      }))
+      (financeRes.data ?? []).map((row) => {
+        const rec = row as Record<string, unknown>;
+        const tipe = normalizeFinanceTipe(rec.tipe, rec.pengeluaran_scope, rec.nama_pos ?? rec.pos ?? rec.nama);
+        return {
+          id: String(rec.id ?? ""),
+          tipe,
+          namaPos:
+            String(rec.nama_pos ?? "") ||
+            String(rec.pos ?? "") ||
+            String(rec.nama ?? ""),
+          pengeluaranScope:
+            isPengeluaranTipe(tipe) ? normalizePengeluaranScope(rec.pengeluaran_scope) : undefined,
+        };
+      })
     );
 
-    setLokasiData(
-      (lokasiRes.data ?? []).map((row) => ({
-        id: String((row as Record<string, unknown>).id ?? ""),
-        namaLokasi:
-          String((row as Record<string, unknown>).nama_lokasi ?? "") ||
-          String((row as Record<string, unknown>).nama ?? ""),
-      }))
-    );
+    const lokasiMapped = (lokasiRes.data ?? []).map((row) => ({
+      id: String((row as Record<string, unknown>).id ?? ""),
+      namaLokasi:
+        String((row as Record<string, unknown>).nama_lokasi ?? "") ||
+        String((row as Record<string, unknown>).nama ?? ""),
+    }));
+
+    setLokasiData(lokasiMapped);
+
+    setBlokForm((prev) => {
+      const stillValid = lokasiMapped.some((l) => l.id === prev.lokasiId);
+      if (stillValid) return prev;
+      const first = lokasiMapped[0]?.id ?? "";
+      return first ? { ...prev, lokasiId: first } : prev;
+    });
 
     setBlokData(
       (blokRes.data ?? []).map((row) => ({
@@ -353,6 +518,10 @@ export default function MasterPageClient({
             String(record.nama ?? "") ||
             String(record.name ?? "Unknown User"),
           email: String(record.email ?? "-"),
+          username:
+            typeof record.username === "string" && record.username.trim() ?
+              String(record.username).trim()
+            : undefined,
           noHp: String(record.no_hp ?? "") || String(record.noHp ?? "") || "",
           role,
           aksesLokasi: Array.isArray(aksesLokasiRaw)
@@ -377,20 +546,44 @@ export default function MasterPageClient({
     resetMessages();
     setIsLoading(true);
 
+    const trimmedPos = financeForm.namaPos.trim();
+    const pemasukanKindByPos = classifyPemasukanKindByPos(trimmedPos);
+    if (
+      financeForm.tipe === "Pemasukan kos" &&
+      pemasukanKindByPos !== "sewa_kamar" &&
+      pemasukanKindByPos !== "booking_fee"
+    ) {
+      const msg = 'Pemasukan kos hanya untuk POS "Sewa kamar" atau "Booking fee". POS lainnya gunakan tipe Pemasukan manajemen.';
+      setErrorMessage(msg);
+      toast(msg, "error");
+      setIsLoading(false);
+      return;
+    }
+    const resolvedPengeluaranScope = pengeluaranScopeForFinanceTipe(financeForm.tipe);
+    const resolvedPemasukanScope = pemasukanScopeForFinanceTipe(financeForm.tipe);
+    const resolvedPemasukanKind =
+      financeForm.tipe === "Pemasukan kos" ? pemasukanKindByPos : pemasukanKindForFinanceTipe(financeForm.tipe);
     const payload = {
       tipe: financeForm.tipe,
-      nama_pos: financeForm.namaPos,
+      nama_pos: trimmedPos,
+      pengeluaran_scope: resolvedPengeluaranScope,
+      pemasukan_scope: resolvedPemasukanScope,
+      pemasukan_kind: resolvedPemasukanKind,
     };
 
     if (localDemoMode) {
+      const nextRow: FinanceKategoriRow = {
+        id: editingFinanceId ?? newSandboxId(),
+        tipe: financeForm.tipe,
+        namaPos: trimmedPos || "(Tanpa nama)",
+        pengeluaranScope: resolvedPengeluaranScope ?? undefined,
+      };
       const nextFinance = editingFinanceId
-        ? financeData.map((r) =>
-            r.id === editingFinanceId ? { ...r, tipe: financeForm.tipe, namaPos: financeForm.namaPos } : r
-          )
-        : [{ id: newSandboxId(), tipe: financeForm.tipe, namaPos: financeForm.namaPos }, ...financeData];
+        ? financeData.map((r) => (r.id === editingFinanceId ? nextRow : r))
+        : [nextRow, ...financeData];
       setFinanceData(nextFinance);
       persistMasterFull(nextFinance, lokasiData, blokData, usersData);
-      setFinanceForm({ tipe: "Pemasukan", namaPos: "" });
+      setFinanceForm({ tipe: "Pemasukan manajemen", namaPos: "" });
       setEditingFinanceId(null);
       setSuccessMessage("Finance master berhasil disimpan.");
       toast("Data finance master berhasil disimpan.", "success");
@@ -409,7 +602,7 @@ export default function MasterPageClient({
       return;
     }
 
-    setFinanceForm({ tipe: "Pemasukan", namaPos: "" });
+    setFinanceForm({ tipe: "Pemasukan manajemen", namaPos: "" });
     setEditingFinanceId(null);
     setSuccessMessage("Finance master data berhasil disimpan.");
     toast("Data finance master berhasil disimpan.", "success");
@@ -627,7 +820,7 @@ export default function MasterPageClient({
         : row.aksesLokasi;
     setUserForm({
       nama: row.nama,
-      email: row.email === "-" ? "" : row.email,
+      username: loginDisplayPrimary({ username: row.username, email: row.email }),
       noHp: row.noHp,
       password: "",
       role: row.role,
@@ -676,17 +869,29 @@ export default function MasterPageClient({
         }
       }
 
+      const passwordOutbound =
+        localDemoMode ? userForm.password : editingUserId && !canSuperAdminMaster ? "" : userForm.password;
+
       const payload = {
         nama: userForm.nama.trim(),
-        email: userForm.email.trim(),
+        username: userForm.username.trim(),
         noHp: userForm.noHp.trim(),
-        password: userForm.password,
+        password: passwordOutbound,
         role: userForm.role,
         aksesLokasi: userForm.aksesLokasi,
         aksesBlok: userForm.aksesBlok,
       };
 
       if (localDemoMode) {
+        const sandboxEmailFromLogin = (rawLogin: string) => {
+          const t = rawLogin.trim();
+          if (t.includes("@")) return { email: t.toLowerCase(), username: undefined as string | undefined };
+          const u = t
+            .replace(/\s+/g, "_")
+            .toLowerCase()
+            .replace(/[^a-z0-9._-]/g, "");
+          return { email: `${u || "user"}@sandbox.demo`, username: u || undefined };
+        };
         const allLokasiIds = lokasiData.map((l) => l.id);
         const aksesLokasi =
           userForm.role === "supervisor" || userForm.role === "manager"
@@ -696,12 +901,14 @@ export default function MasterPageClient({
           const nextU = usersData.map((u) => {
             if (u.id !== editingUserId) return u;
             if (u.role === "super_admin") {
-              return { ...u, nama: payload.nama, email: payload.email, noHp: payload.noHp };
+              return { ...u, nama: payload.nama, email: payload.username.trim().toLowerCase(), noHp: payload.noHp };
             }
+            const sb = sandboxEmailFromLogin(payload.username);
             return {
               ...u,
               nama: payload.nama,
-              email: payload.email,
+              email: sb.email,
+              username: sb.username,
               noHp: payload.noHp,
               role: userForm.role,
               aksesLokasi,
@@ -714,10 +921,15 @@ export default function MasterPageClient({
           setSuccessMessage("Data user diperbarui.");
           toast("Data user berhasil diperbarui.", "success");
         } else {
+          const sb =
+            userForm.role === "super_admin"
+              ? { email: payload.username.trim().toLowerCase(), username: undefined as string | undefined }
+              : sandboxEmailFromLogin(payload.username);
           const newRow: UserProfileRow = {
             id: newSandboxId(),
             nama: payload.nama,
-            email: payload.email,
+            email: sb.email,
+            ...(sb.username ? { username: sb.username } : {}),
             noHp: payload.noHp,
             role: userForm.role,
             aksesLokasi,
@@ -799,9 +1011,9 @@ export default function MasterPageClient({
   };
 
   return (
-    <section className="space-y-5">
-      <div className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-4 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
-        <div className="flex flex-wrap gap-2">
+    <section className="mx-auto min-w-0 max-w-full space-y-5 pb-4">
+      <div className={pageTabStripClass}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button type="button" onClick={() => setActiveTab("finance")} className={tabBtnClass("finance")}>
             <span className="inline-flex items-center gap-1"><HandCoins size={12} className={iconTone.brand} />Finance Master Data</span>
           </button>
@@ -827,8 +1039,8 @@ export default function MasterPageClient({
       {null}
 
       {activeTab === "finance" ? (
-        <div className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-5 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+        <div className="flex min-w-0 flex-col gap-5">
+          <article className={`min-w-0 ${pageSectionClass}`}>
             <SectionTitleWithIcon
               icon={HandCoins}
               title="Form Finance Kategori"
@@ -836,30 +1048,39 @@ export default function MasterPageClient({
             />
             <form className="mt-4 space-y-4" onSubmit={submitFinanceKategori}>
               <div>
-                <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Tipe</label>
+                <label className={pageLabelClass}>Tipe</label>
                 <select
                   value={financeForm.tipe}
-                  onChange={(event) =>
-                    setFinanceForm((prev) => ({ ...prev, tipe: event.target.value as FinanceType }))
-                  }
-                  className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                  onChange={(event) => {
+                    const tipe = event.target.value as FinanceType;
+                    setFinanceForm((prev) => ({ ...prev, tipe }));
+                  }}
+                  className={pageFieldClass}
                 >
-                  <option value="Pemasukan">Pemasukan</option>
-                  <option value="Pengeluaran">Pengeluaran</option>
+                  <option value="Pemasukan kos">Pemasukan kos</option>
+                  <option value="Pemasukan manajemen">Pemasukan manajemen</option>
+                  <option value="Pengeluaran kos">Pengeluaran kos</option>
+                  <option value="Pengeluaran manajemen">Pengeluaran manajemen</option>
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Nama POS</label>
+                <label className={pageLabelClass}>Nama POS</label>
                 <input
                   required
                   value={financeForm.namaPos}
                   onChange={(event) =>
                     setFinanceForm((prev) => ({ ...prev, namaPos: event.target.value }))
                   }
-                  className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                  className={pageFieldClass}
                   placeholder="Contoh: Sewa Bulanan"
                 />
               </div>
+              {isPengeluaranTipe(financeForm.tipe) ? (
+                <p className="mt-1 text-[11px] leading-snug text-[#6b6f8a] dark:text-[#a8add4]">
+                  Tipe ini otomatis menentukan lingkup P&amp;L. Untuk pemasukan kos, gunakan POS "Sewa kamar" atau
+                  "Booking fee"; POS pemasukan lainnya masuk pemasukan manajemen.
+                </p>
+              ) : null}
               <ActionButtonWithIcon
                 icon={Save}
                 type="submit"
@@ -871,36 +1092,104 @@ export default function MasterPageClient({
             </form>
           </article>
 
-          <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-5 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+          <article className={`flex min-w-0 flex-col ${pageSectionClass}`}>
             <SectionTitleWithIcon
               icon={Settings2}
               title="List Finance Kategori"
               iconClassName={iconTone.brand}
-              className="mb-3"
+              className="mb-2 shrink-0"
             />
-            <div className="overflow-x-auto rounded-2xl border border-[#d6ddff] dark:border-[#424a80]">
+            <p className="mb-3 shrink-0 text-xs leading-relaxed text-[#5d6fc0] dark:text-[#a8b5e8]">
+              Di HP: kartu per baris. Di tablet ke atas: tabel.
+            </p>
+            <div className="space-y-3 md:hidden">
+              {financeData.map((row) => (
+                <article
+                  key={row.id}
+                  className="rounded-2xl border border-[#d6ddff] bg-[#f7f8ff]/90 p-4 dark:border-[#424a80] dark:bg-[#1b1f3d]/90"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <StatusBadge status={row.tipe} />
+                    <span className="text-xs text-[#4b4f6b] dark:text-[#b8bdda]">
+                      {isPengeluaranTipe(row.tipe)
+                        ? pengeluaranScopeForFinanceTipe(row.tipe) === "manajemen"
+                          ? "Manajemen"
+                          : "Kos"
+                        : isPemasukanTipe(row.tipe)
+                          ? pemasukanScopeForFinanceTipe(row.tipe) === "kos"
+                            ? "Kos"
+                            : "Manajemen"
+                          : "—"}
+                    </span>
+                  </div>
+                  <p className="mt-3 break-words text-sm font-medium text-[#1f1b42] dark:text-[#dbe3ff]">
+                    {row.namaPos}
+                  </p>
+                  {canManageMaster ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <ActionButtonWithIcon
+                        icon={Pencil}
+                        onClick={() => {
+                          setFinanceForm({
+                            tipe: normalizeFinanceTipe(row.tipe, row.pengeluaranScope, row.namaPos),
+                            namaPos: row.namaPos,
+                          });
+                          setEditingFinanceId(row.id);
+                        }}
+                        label="Edit"
+                        className="rounded-full bg-blue-500 px-3 py-1 text-xs font-semibold text-white"
+                      />
+                      <ActionButtonWithIcon
+                        icon={Trash2}
+                        onClick={() =>
+                          void confirmAndDeleteMasterRow("finance_kategori", row.id, row.namaPos)
+                        }
+                        label="Hapus"
+                        className="rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white"
+                      />
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+            <div className="hidden min-w-0 overflow-x-auto rounded-2xl border border-[#d6ddff] md:block dark:border-[#424a80]">
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-[#f7f8ff] dark:bg-[#1b1f3d]">
                   <tr className="text-xs uppercase tracking-[0.12em] text-[#5d6fc0]">
                     <th className="px-3 py-2.5">Tipe</th>
                     <th className="px-3 py-2.5">Nama POS</th>
+                    <th className="px-3 py-2.5">Lingkup</th>
                     <th className="px-3 py-2.5">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
                   {financeData.map((row) => (
                     <tr key={row.id} className="border-t border-[#d6ddff] dark:border-[#424a80]">
-                      <td className="px-3 py-2.5">
+                      <td className="max-w-[min(12rem,50vw)] px-3 py-2.5 align-top">
                         <StatusBadge status={row.tipe} />
                       </td>
-                      <td className="px-3 py-2.5">{row.namaPos}</td>
-                      <td className="px-3 py-2.5">
+                      <td className="max-w-[min(16rem,55vw)] px-3 py-2.5 align-top break-words">{row.namaPos}</td>
+                      <td className="px-3 py-2.5 text-xs text-[#4b4f6b] dark:text-[#b8bdda]">
+                        {isPengeluaranTipe(row.tipe)
+                          ? pengeluaranScopeForFinanceTipe(row.tipe) === "manajemen"
+                            ? "Manajemen"
+                            : "Kos"
+                          : isPemasukanTipe(row.tipe)
+                            ? pemasukanScopeForFinanceTipe(row.tipe) === "kos"
+                              ? "Kos"
+                              : "Manajemen"
+                            : "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 align-top">
                         {canManageMaster ? (
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
                             <ActionButtonWithIcon
                               icon={Pencil}
                               onClick={() => {
-                                setFinanceForm({ tipe: row.tipe, namaPos: row.namaPos });
+                                setFinanceForm({
+                                  tipe: normalizeFinanceTipe(row.tipe, row.pengeluaranScope, row.namaPos),
+                                  namaPos: row.namaPos,
+                                });
                                 setEditingFinanceId(row.id);
                               }}
                               label="Edit"
@@ -922,13 +1211,16 @@ export default function MasterPageClient({
                 </tbody>
               </table>
             </div>
+            <p className="mt-3 shrink-0 text-[11px] leading-snug text-[#6b6f8a] dark:text-[#8b92b8]">
+              Baris mengikuti pengaturan di atas; gunakan scroll halaman jika daftar POS panjang.
+            </p>
           </article>
         </div>
       ) : null}
 
       {activeTab === "lokasi" ? (
-        <div className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-5 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+        <div className="flex min-w-0 flex-col gap-5">
+          <article className={`min-w-0 ${pageSectionClass}`}>
             <SectionTitleWithIcon
               icon={Building2}
               title="Master Lokasi"
@@ -939,7 +1231,7 @@ export default function MasterPageClient({
                 required
                 value={lokasiForm.namaLokasi}
                 onChange={(event) => setLokasiForm({ namaLokasi: event.target.value })}
-                className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                className={pageFieldClass}
                 placeholder="Nama lokasi kos"
               />
               <ActionButtonWithIcon
@@ -955,10 +1247,13 @@ export default function MasterPageClient({
             <h3 className="mt-6 mb-2 font-semibold">Daftar Lokasi</h3>
             <div className="space-y-2">
               {lokasiData.map((row) => (
-                <div key={row.id} className="flex items-center justify-between rounded-xl border border-[#d6ddff] px-3 py-2 dark:border-[#424a80]">
-                  <span>{row.namaLokasi}</span>
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-2 rounded-xl border border-[#d6ddff] px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-[#424a80]"
+                >
+                  <span className="min-w-0 break-words">{row.namaLokasi}</span>
                   {canManageMaster ? (
-                  <div className="flex gap-2">
+                  <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
                     <ActionButtonWithIcon
                       icon={Pencil}
                       onClick={() => {
@@ -983,7 +1278,7 @@ export default function MasterPageClient({
             </div>
           </article>
 
-          <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-5 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+          <article className={`min-w-0 ${pageSectionClass}`}>
             <SectionTitleWithIcon
               icon={Building2}
               title="Master Blok / Unit"
@@ -993,7 +1288,7 @@ export default function MasterPageClient({
               <select
                 value={blokForm.lokasiId}
                 onChange={(event) => setBlokForm((prev) => ({ ...prev, lokasiId: event.target.value }))}
-                className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                className={pageFieldClass}
               >
                 {lokasiData.map((loc) => (
                   <option key={loc.id} value={loc.id}>
@@ -1005,7 +1300,7 @@ export default function MasterPageClient({
                 required
                 value={blokForm.namaBlok}
                 onChange={(event) => setBlokForm((prev) => ({ ...prev, namaBlok: event.target.value }))}
-                className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                className={pageFieldClass}
                 placeholder="Nama blok / unit"
               />
               <ActionButtonWithIcon
@@ -1023,10 +1318,15 @@ export default function MasterPageClient({
               {blokData.map((row) => {
                 const lokasi = lokasiData.find((loc) => loc.id === row.lokasiId)?.namaLokasi ?? "-";
                 return (
-                  <div key={row.id} className="flex items-center justify-between rounded-xl border border-[#e4d3bd] px-3 py-2 dark:border-[#3d2f22]">
-                    <span>{row.namaBlok} ({lokasi})</span>
+                  <div
+                    key={row.id}
+                    className="flex flex-col gap-2 rounded-xl border border-[#e4d3bd] px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-[#3d2f22]"
+                  >
+                    <span className="min-w-0 break-words">
+                      {row.namaBlok} ({lokasi})
+                    </span>
                     {canManageMaster ? (
-                    <div className="flex gap-2">
+                    <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
                       <ActionButtonWithIcon
                         icon={Pencil}
                         onClick={() => {
@@ -1055,68 +1355,96 @@ export default function MasterPageClient({
       ) : null}
 
       {activeTab === "user" ? (
-        <div className="grid gap-5 lg:grid-cols-2">
-          <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-5 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+        <>
+        <div className="flex min-w-0 flex-col gap-5">
+          <article className={`min-w-0 ${pageSectionClass}`}>
             <SectionTitleWithIcon
               icon={Users}
               title={editingUserId ? "Edit User" : "Tambah User"}
               iconClassName={iconTone.info}
               className="mb-1"
             />
-            <p className="mb-4 text-xs text-[#5d6fc0] dark:text-[#dbe3ff]">
-              Hanya akun super_admin yang dapat menambah, mengubah, atau menghapus user. Tambahkan{" "}
-              <code className="rounded bg-[#eef2ff] px-1 py-0.5 text-[0.65rem] dark:bg-[#1b1f3d]">
-                SUPABASE_SERVICE_ROLE_KEY
-              </code>{" "}
-              di server agar pembuatan password berfungsi.
+            <p className="mb-4 text-xs leading-relaxed text-[#5d6fc0] dark:text-[#dbe3ff]">
+              {localDemoMode ? (
+                <>
+                  Sandbox: Anda dapat menguji user seperti biasa secara lokal. Di mode cloud,{" "}
+                  <strong>hanya Super Admin</strong> yang dapat menambah, menghapus, mengubah user, serta mengedit
+                  password dari Master (API diblok untuk role lain).
+                </>
+              ) : (
+                <>
+                  Di mode cloud, <strong>hanya Super Admin</strong> yang dapat menambah, menghapus, mengubah user, serta
+                  mengatur password dari sini.
+                </>
+              )}
             </p>
-            <form className="space-y-4" onSubmit={submitUserMaster}>
+            <form className="min-w-0 space-y-4" onSubmit={submitUserMaster}>
               <div>
-                <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Nama</label>
+                <label className={pageLabelClass}>Nama</label>
                 <input
                   required
                   value={userForm.nama}
                   onChange={(e) => setUserForm((p) => ({ ...p, nama: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                  className={pageFieldClass}
                   placeholder="Nama lengkap"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">E-mail</label>
+                <label className={pageLabelClass}>
+                  {editingUserId && userForm.role === "super_admin" ? "Email login" : "Username login"}
+                </label>
                 <input
                   required
-                  type="email"
-                  value={userForm.email}
-                  onChange={(e) => setUserForm((p) => ({ ...p, email: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
-                  placeholder="email@domain.com"
+                  type="text"
+                  autoComplete={editingUserId && userForm.role === "super_admin" ? "email" : "username"}
+                  value={userForm.username}
+                  onChange={(e) => setUserForm((p) => ({ ...p, username: e.target.value }))}
+                  className={pageFieldClass}
+                  placeholder={
+                    editingUserId && userForm.role === "super_admin" ?
+                      "superadmin@gmail.com"
+                    : "budiono_kasir (tanpa @ — huruf kecil / angka / . _ -)"
+                  }
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">No. HP</label>
+                <label className={pageLabelClass}>No. HP</label>
                 <input
                   value={userForm.noHp}
                   onChange={(e) => setUserForm((p) => ({ ...p, noHp: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                  className={pageFieldClass}
                   placeholder="08…"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Password</label>
+                <label className={pageLabelClass}>Password</label>
+                {editingUserId && !canSuperAdminMaster && !localDemoMode ? (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                    Edit password pengguna tidak tersedia untuk role Anda — hanya Super Admin. Minta pemilik mengubah
+                    di Master atau gunakan tautan &quot;Lupa Password&quot; di halaman login.
+                  </p>
+                ) : null}
                 <input
                   type="password"
-                  required={!editingUserId}
-                  value={userForm.password}
+                  required={Boolean(!editingUserId)}
+                  disabled={Boolean(editingUserId && !canSuperAdminMaster && !localDemoMode)}
+                  value={editingUserId && !canSuperAdminMaster && !localDemoMode ? "" : userForm.password}
                   onChange={(e) => setUserForm((p) => ({ ...p, password: e.target.value }))}
-                  className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
-                  placeholder={editingUserId ? "Kosongkan jika tidak diubah" : "Minimal 6 karakter"}
+                  className={`mt-2 ${pageFieldClass} disabled:cursor-not-allowed disabled:bg-[#ebefff] disabled:text-[#7a8499] dark:disabled:bg-[#141828]`}
+                  placeholder={
+                    editingUserId && canSuperAdminMaster
+                      ? "Kosongkan jika tidak diubah"
+                      : editingUserId
+                        ? "—"
+                        : "Minimal 6 karakter"
+                  }
                 />
               </div>
 
               {userForm.role !== "super_admin" ? (
                 <>
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Role</label>
+                    <label className={pageLabelClass}>Role</label>
                     <select
                       value={userForm.role}
                       onChange={(e) => {
@@ -1134,7 +1462,7 @@ export default function MasterPageClient({
                               : p.aksesBlok,
                         }));
                       }}
-                      className="w-full rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] px-4 py-2.5 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]"
+                      className={pageFieldClass}
                     >
                       <option value="owner">Owner</option>
                       <option value="supervisor">Supervisor</option>
@@ -1143,11 +1471,11 @@ export default function MasterPageClient({
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-[0.16em] text-[#5d6fc0]">Hak menu akses</label>
+                    <label className={pageLabelClass}>Hak menu akses</label>
                     <input
                       value={userMenuAccessLabel}
                       readOnly
-                      className="w-full rounded-2xl border border-[#d6ddff] bg-[#eef2ff] px-4 py-2.5 text-sm text-[#4f61aa] dark:border-[#424a80] dark:bg-[#1b1f3d] dark:text-[#dbe3ff]"
+                      className={`${pageFieldClass} bg-[#eef2ff] text-[#4f61aa] dark:text-[#dbe3ff]`}
                     />
                   </div>
 
@@ -1155,7 +1483,7 @@ export default function MasterPageClient({
                     <div>
                       <p className="mb-2 text-xs uppercase tracking-[0.16em] text-[#8a6b45]">Hak akses lokasi</p>
                       <p className="mb-2 text-xs text-[#a08058]">Pilih satu atau lebih lokasi yang boleh diakses.</p>
-                      <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-[#e4d3bd] p-2 dark:border-[#3d2f22]">
+                      <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-[#e4d3bd] p-2 pb-3 dark:border-[#3d2f22]">
                         {lokasiData.map((loc) => (
                           <label key={loc.id} className="flex items-center gap-2 text-sm">
                             <input
@@ -1167,6 +1495,9 @@ export default function MasterPageClient({
                           </label>
                         ))}
                       </div>
+                      <p className="mt-2 text-[11px] leading-snug text-[#a08058] dark:text-[#c4a574]">
+                        Kotak lokasi bisa digulir vertikal jika banyak entri — teks di atas kotak tidak terpotong.
+                      </p>
                     </div>
                   ) : (
                     <div className="rounded-xl border border-[#e4d3bd] bg-[#fbf4ea] px-3 py-2 text-sm dark:border-[#3d2f22] dark:bg-[#2b2016]">
@@ -1182,7 +1513,7 @@ export default function MasterPageClient({
                         ? "Hanya blok pada lokasi terpilih yang ditampilkan."
                         : "Pilih blok/unit yang boleh diakses (boleh lebih dari satu)."}
                     </p>
-                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-[#e4d3bd] p-2 dark:border-[#3d2f22]">
+                    <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-[#e4d3bd] p-2 pb-3 dark:border-[#3d2f22]">
                       {blokOptionsForUserForm.length === 0 ? (
                         <p className="text-xs text-[#a08058]">
                           {userForm.role === "owner" || userForm.role === "staff"
@@ -1207,6 +1538,9 @@ export default function MasterPageClient({
                         })
                       )}
                     </div>
+                    <p className="mt-2 text-[11px] leading-snug text-[#a08058] dark:text-[#c4a574]">
+                      Gulir di dalam kotak untuk daftar blok panjang; petunjuk di atas tetap terlihat.
+                    </p>
                   </div>
                 </>
               ) : (
@@ -1219,7 +1553,7 @@ export default function MasterPageClient({
                 <ActionButtonWithIcon
                   icon={Save}
                   type="submit"
-                  disabled={isLoading || !canManageMaster}
+                  disabled={isLoading || !canMutateMasterUsers}
                   label={editingUserId ? "Simpan Perubahan" : "Simpan User"}
                   iconClassName={iconTone.success}
                   className="rounded-full bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-6 py-2.5 text-sm font-semibold text-[#eef3ff] disabled:opacity-70"
@@ -1239,38 +1573,87 @@ export default function MasterPageClient({
             </form>
           </article>
 
-          <article className="rounded-[2rem] border border-[#d8defc] bg-white/90 p-5 dark:border-[#424a80] dark:bg-[#1b1f3d]/95">
+          <article className={`flex min-w-0 flex-col ${pageSectionClass}`}>
             <SectionTitleWithIcon
               icon={Users}
               title="Daftar User"
               iconClassName={iconTone.brand}
-              className="mb-3"
+              className="mb-2 shrink-0"
             />
-            <div className="overflow-x-auto rounded-2xl border border-[#d6ddff] dark:border-[#424a80]">
-              <table className="min-w-full text-left text-sm">
+            <p className="mb-3 shrink-0 text-xs leading-relaxed text-[#5d6fc0] dark:text-[#a8b5e8]">
+              Di HP: kartu per pengguna. Di layar lebar: tabel.
+            </p>
+            <div className="space-y-3 md:hidden">
+              {usersData.map((row) => {
+                const isSuper = row.role === "super_admin";
+                const canEdit = canMutateMasterUsers && (!isSuper || row.id === currentUserId);
+                const canDelete = canMutateMasterUsers && !isSuper && row.id !== currentUserId;
+                return (
+                  <article
+                    key={row.id}
+                    className="rounded-2xl border border-[#d6ddff] bg-[#f7f8ff]/90 p-4 dark:border-[#424a80] dark:bg-[#1b1f3d]/90"
+                  >
+                    <p className="font-semibold text-[#1f1b42] dark:text-[#dbe3ff]">{row.nama}</p>
+                    <p className="mt-1 break-all font-mono text-[0.7rem] text-[#4f61aa] dark:text-[#a8b5e8]">
+                      {loginDisplayPrimary(row)}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#5d6fc0] dark:text-[#a8b5e8]">
+                      <span>HP: {row.noHp || "—"}</span>
+                      <StatusBadge status={row.role} />
+                    </div>
+                    {canEdit || canDelete ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {canEdit ? (
+                          <ActionButtonWithIcon
+                            icon={Pencil}
+                            onClick={() => {
+                              resetMessages();
+                              loadUserIntoForm(row);
+                            }}
+                            label="Edit"
+                            className="rounded-full bg-blue-500 px-3 py-1 text-xs font-semibold text-white"
+                          />
+                        ) : null}
+                        {canDelete ? (
+                          <ActionButtonWithIcon
+                            icon={Trash2}
+                            onClick={() => void deleteUserMaster(row)}
+                            label="Hapus"
+                            className="rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white"
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+            <div className="hidden min-w-0 overflow-x-auto rounded-2xl border border-[#d6ddff] md:block dark:border-[#424a80]">
+              <table className="min-w-full table-fixed text-left text-sm">
                 <thead className="bg-[#f7f8ff] dark:bg-[#1b1f3d]">
                   <tr className="text-xs uppercase tracking-[0.12em] text-[#5d6fc0]">
-                    <th className="px-3 py-2.5">Nama</th>
-                    <th className="px-3 py-2.5">Email</th>
-                    <th className="px-3 py-2.5">HP</th>
-                    <th className="px-3 py-2.5">Role</th>
+                    <th className="w-[18%] px-3 py-2.5">Nama</th>
+                    <th className="w-[28%] px-3 py-2.5">Username / Login</th>
+                    <th className="w-[14%] px-3 py-2.5">HP</th>
+                    <th className="w-[14%] px-3 py-2.5">Role</th>
                     <th className="px-3 py-2.5">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
                   {usersData.map((row) => {
                     const isSuper = row.role === "super_admin";
-                    const canEdit = canManageMaster && (!isSuper || row.id === currentUserId);
-                    const canDelete = canManageMaster && !isSuper && row.id !== currentUserId;
+                    const canEdit =
+                      canMutateMasterUsers && (!isSuper || row.id === currentUserId);
+                    const canDelete = canMutateMasterUsers && !isSuper && row.id !== currentUserId;
                     return (
                       <tr key={row.id} className="border-t border-[#d6ddff] dark:border-[#424a80]">
-                        <td className="px-3 py-2.5 font-medium">{row.nama}</td>
-                        <td className="px-3 py-2.5 text-xs">{row.email}</td>
-                        <td className="px-3 py-2.5 text-xs">{row.noHp || "—"}</td>
-                        <td className="px-3 py-2.5">
+                        <td className="px-3 py-2.5 align-top font-medium break-words">{row.nama}</td>
+                        <td className="px-3 py-2.5 align-top font-mono text-[0.7rem] break-all">{loginDisplayPrimary(row)}</td>
+                        <td className="px-3 py-2.5 align-top text-xs break-words">{row.noHp || "—"}</td>
+                        <td className="px-3 py-2.5 align-top">
                           <StatusBadge status={row.role} />
                         </td>
-                        <td className="px-3 py-2.5">
+                        <td className="whitespace-nowrap px-3 py-2.5 align-top">
                           <div className="flex flex-wrap gap-2">
                             {canEdit ? (
                               <ActionButtonWithIcon
@@ -1299,8 +1682,109 @@ export default function MasterPageClient({
                 </tbody>
               </table>
             </div>
+            <p className="mt-3 shrink-0 text-[11px] leading-snug text-[#6b6f8a] dark:text-[#8b92b8]">
+              Banyak user: di desktop gunakan tabel; di HP gunakan kartu di atas.
+            </p>
           </article>
         </div>
+
+          <article className={`mt-5 min-w-0 ${pageSectionClass}`}>
+            <SectionTitleWithIcon
+              icon={History}
+              title="Log perubahan password"
+              iconClassName={iconTone.brand}
+              className="mb-2 shrink-0"
+            />
+            <p className="mb-4 text-xs leading-relaxed text-[#5d6fc0] dark:text-[#dbe3ff]">
+              Hanya teks audit: waktu, pengguna bersangkutan, sumber, dan keterangan. Nilai password tidak pernah dicatat.
+              Sumber <strong>forgot_email</strong>: password baru dibuat sistem lalu dikirim ke inbox; sumber{" "}
+              <strong>admin_master</strong>: pembaruan lewat formulir oleh Super Admin.
+            </p>
+            {localDemoMode ? (
+              <p className="rounded-xl border border-[#eadcc9] bg-[#faf6ef] px-3 py-2 text-xs text-[#7f6344] dark:border-[#3d3228] dark:bg-[#261c14] dark:text-[#d4bc94]">
+                Mode sandbox: log password tidak tersedia. Aktifkan koneksi Supabase untuk mencatat perubahan.
+              </p>
+            ) : !canMutateMasterUsersCloud && !localDemoMode ? (
+              <p className="rounded-xl border border-[#eadcc9] px-3 py-2 text-xs text-[#7f6344]">
+                Log ini hanya tersedia untuk Super Admin pada mode cloud.
+              </p>
+            ) : passwordLogRows.length === 0 ? (
+              <p className="text-xs text-[#a08058]">
+                Belum ada entri atau tabel audit belum dimigrasi — jalankan skrip SQL <code className="text-[0.65rem]">password_change_log</code> dari{" "}
+                <code className="text-[0.65rem]">supabase/sync_frontend_schema.sql</code> (dan policies di{" "}
+                <code className="text-[0.65rem]">strict_production_rls.sql</code>).
+              </p>
+            ) : (
+              <>
+                <div className="space-y-3 md:hidden">
+                  {passwordLogRows.map((log) => {
+                    const waktu =
+                      log.createdAt && Number.isFinite(Date.parse(log.createdAt))
+                        ? new Date(log.createdAt).toLocaleString("id-ID")
+                        : log.createdAt || "—";
+                    const sid = log.subjectUserId;
+                    const shortId = sid.length > 12 ? `${sid.slice(0, 8)}…` : sid;
+                    const subjek = userNameById.get(log.subjectUserId) ?? shortId;
+                    return (
+                      <article
+                        key={log.id}
+                        className="rounded-2xl border border-[#d6ddff] bg-[#f7f8ff]/90 p-4 text-sm dark:border-[#424a80] dark:bg-[#1b1f3d]/90"
+                      >
+                        <p className="text-xs font-medium text-[#5d6fc0] dark:text-[#a8b5e8]">{waktu}</p>
+                        <p className="mt-2 break-words text-[#1f1b42] dark:text-[#dbe3ff]">{subjek}</p>
+                        <div className="mt-2">
+                          <StatusBadge status={log.source} />
+                        </div>
+                        <p className="mt-2 text-xs leading-relaxed text-[#4a3624] dark:text-[#e8d4bc]">
+                          {log.detail}
+                        </p>
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="hidden min-w-0 overflow-x-auto rounded-2xl border border-[#d6ddff] md:block dark:border-[#424a80]">
+                  <table className="min-w-[min(100%,52rem)] text-left text-sm">
+                    <thead className="bg-[#f7f8ff] dark:bg-[#1b1f3d]">
+                      <tr className="text-[0.65rem] uppercase tracking-[0.12em] text-[#5d6fc0]">
+                        <th className="whitespace-nowrap px-3 py-2">Waktu</th>
+                        <th className="min-w-[7rem] px-3 py-2">Pengguna</th>
+                        <th className="min-w-[6rem] px-3 py-2">Sumber</th>
+                        <th className="min-w-[12rem] px-3 py-2">Keterangan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {passwordLogRows.map((log) => {
+                        const waktu =
+                          log.createdAt && Number.isFinite(Date.parse(log.createdAt))
+                            ? new Date(log.createdAt).toLocaleString("id-ID")
+                            : log.createdAt || "—";
+                        const sid = log.subjectUserId;
+                        const shortId = sid.length > 12 ? `${sid.slice(0, 8)}…` : sid;
+                        const subjek = userNameById.get(log.subjectUserId) ?? shortId;
+                        return (
+                          <tr key={log.id} className="border-t border-[#e6eaf8] dark:border-[#2f355f]">
+                            <td className="whitespace-nowrap px-3 py-2 align-top text-xs">{waktu}</td>
+                            <td className="px-3 py-2 align-top text-xs break-words">{subjek}</td>
+                            <td className="px-3 py-2 align-top">
+                              <StatusBadge status={log.source} />
+                            </td>
+                            <td className="px-3 py-2 align-top text-xs text-[#4a3624] dark:text-[#e8d4bc] break-words">
+                              {log.detail}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-[11px] leading-snug text-[#6b6f8a] dark:text-[#8b92b8]">
+                  Paragraf penjelasan di atas tidak berada di dalam frame scroll — gunakan scroll halaman untuk melihat
+                  seluruh log; teks keterangan di dalam sel dibungkus agar tidak terpotong horizontal.
+                </p>
+              </>
+            )}
+          </article>
+        </>
       ) : null}
 
       <RefreshToolbarButton

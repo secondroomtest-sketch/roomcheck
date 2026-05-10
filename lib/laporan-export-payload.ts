@@ -1,5 +1,7 @@
 import type { PenghuniRow, SurveyCalonRow } from "@/components/penghuni-page-client";
 import { isExcludedFromOwnerDashboardRevenue } from "@/lib/finance-dashboard-revenue";
+import type { LaporanMonthlyFinanceRow } from "@/lib/laporan-finance-breakdown";
+import { computeLaporanFinanceBreakdown } from "@/lib/laporan-finance-breakdown";
 import type {
   LaporanDashboardCard,
   LaporanExportPayloadV1,
@@ -59,6 +61,7 @@ export function buildLaporanExportPayloadV1(params: {
   currentUserName: string;
   userProfileRole: string;
   localDemoMode: boolean;
+  laporanFokus?: "kos" | "manajemen";
   filters: {
     startDate: string;
     endDate: string;
@@ -67,7 +70,7 @@ export function buildLaporanExportPayloadV1(params: {
   };
   filteredFinance: ReportFinanceRow[];
   filteredKamar: ReportKamarRow[];
-  monthlyChartData: { month: string; pemasukan: number; pengeluaran: number }[];
+  monthlyChartData: LaporanMonthlyFinanceRow[];
   statusPieData: { name: string; value: number }[];
   penghuniRows: PenghuniRow[];
   surveyRows: SurveyCalonRow[];
@@ -77,6 +80,7 @@ export function buildLaporanExportPayloadV1(params: {
     currentUserName,
     userProfileRole,
     localDemoMode,
+    laporanFokus,
     filters,
     filteredFinance,
     filteredKamar,
@@ -92,19 +96,13 @@ export function buildLaporanExportPayloadV1(params: {
   const maintenance = filteredKamar.filter((k) => k.status === "Maintenance").length;
   const occupancyPct = total > 0 ? Math.round((occupied / total) * 100) : 0;
 
-  let pemasukanTotal = 0;
-  let pengeluaranTotal = 0;
-  for (const f of filteredFinance) {
-    if (f.kategori === "Pemasukan") pemasukanTotal += f.nominal;
-    else pengeluaranTotal += f.nominal;
-  }
+  const finBreak = computeLaporanFinanceBreakdown(filteredFinance);
 
   const pemasukanRows = filteredFinance.filter((f) => f.kategori === "Pemasukan");
   const revenueOwnerRows = pemasukanRows.filter(
     (f) => !isExcludedFromOwnerDashboardRevenue(f.pos ?? "")
   );
   const revenueOwnerView = revenueOwnerRows.reduce((s, f) => s + f.nominal, 0);
-  const isOwner = userProfileRole.trim().toLowerCase() === "owner";
 
   const { penghuni: penSnaps, survey: surSnaps } = filterPenghuniSurvey(
     filters.selectedLokasi,
@@ -143,11 +141,46 @@ export function buildLaporanExportPayloadV1(params: {
           : `${surveyTotalAll} total · ${surveyFiltered} sesuai filter`,
     },
     {
-      label: "Total Revenue (Pemasukan)",
-      value: isOwner ? formatRp(revenueOwnerView) : formatRp(pemasukanTotal),
-      note: isOwner
-        ? `${revenueOwnerRows.length} transaksi (deposit/booking tidak dijumlahkan)`
-        : `${pemasukanRows.length} transaksi`,
+      label: "Pemasukan kos (sewa + booking)",
+      value: formatRp(finBreak.pemasukanKosTotal),
+      note:
+        finBreak.pemasukanKosTransactionCount === 0
+          ? "Basis P&L kos — belum ada transaksi sewa/booking"
+          : `${finBreak.pemasukanKosTransactionCount} transaksi`,
+    },
+    {
+      label: "Pengeluaran kos",
+      value: formatRp(finBreak.pengeluaranKosTotal),
+      note:
+        finBreak.pengeluaranKosTransactionCount === 0
+          ? "Dipotong dari pemasukan sewa (POS Master: kos)"
+          : `${finBreak.pengeluaranKosTransactionCount} transaksi`,
+    },
+    {
+      label: "P&L Kos",
+      value: formatRp(finBreak.plKosNominal),
+      note: "Pemasukan kos − pengeluaran kos",
+    },
+    {
+      label: "Pemasukan manajemen",
+      value: formatRp(finBreak.pemasukanManajemenTotal),
+      note:
+        finBreak.pemasukanManajemenTransactionCount === 0
+          ? "Dasar P&L manajemen"
+          : `${finBreak.pemasukanManajemenTransactionCount} transaksi`,
+    },
+    {
+      label: "Pengeluaran manajemen",
+      value: formatRp(finBreak.pengeluaranManajemenTotal),
+      note:
+        finBreak.pengeluaranManajemenTransactionCount === 0
+          ? "POS Master: manajemen"
+          : `${finBreak.pengeluaranManajemenTransactionCount} transaksi`,
+    },
+    {
+      label: "P&L Manajemen",
+      value: formatRp(finBreak.plManajemenNominal),
+      note: "Pemasukan manajemen − pengeluaran manajemen",
     },
   ];
 
@@ -157,6 +190,7 @@ export function buildLaporanExportPayloadV1(params: {
     currentUserName,
     userProfileRole,
     localDemoMode,
+    laporanFokus,
     filters,
     summary: {
       kamarTotal: total,
@@ -164,15 +198,26 @@ export function buildLaporanExportPayloadV1(params: {
       available,
       maintenance,
       occupancyPct,
-      pemasukanTotal,
+      pemasukanTotal: finBreak.pemasukanTotal,
+      pemasukanKosTotal: finBreak.pemasukanKosTotal,
+      pemasukanManajemenTotal: finBreak.pemasukanManajemenTotal,
+      pengeluaranKosTotal: finBreak.pengeluaranKosTotal,
+      pengeluaranManajemenTotal: finBreak.pengeluaranManajemenTotal,
+      plKosNominal: finBreak.plKosNominal,
+      plManajemenNominal: finBreak.plManajemenNominal,
       revenueOwnerView,
-      pengeluaranTotal,
+      pengeluaranTotal: finBreak.pengeluaranTotal,
       penghuniStay,
       penghuniBooking,
       surveyCount: surveyFiltered,
       surveyTotalAll,
       pemasukanTransactionCount: pemasukanRows.length,
       pemasukanTransactionCountOwnerView: revenueOwnerRows.length,
+      pemasukanKosTransactionCount: finBreak.pemasukanKosTransactionCount,
+      pemasukanManajemenTransactionCount: finBreak.pemasukanManajemenTransactionCount,
+      pengeluaranKosTransactionCount: finBreak.pengeluaranKosTransactionCount,
+      pengeluaranManajemenTransactionCount: finBreak.pengeluaranManajemenTransactionCount,
+      pengeluaranTransactionCount: finBreak.pengeluaranTransactionCount,
     },
     monthly: monthlyChartData,
     kamarByStatus: statusPieData,
