@@ -1019,8 +1019,8 @@ export default function DashboardPage() {
   return (
     <div className="min-w-0 space-y-4 sm:space-y-6">
       <section className="rounded-2xl border border-[#d8defc]/70 bg-gradient-to-r from-[#f6f8ff] via-[#eef2ff] to-[#f3f1ff] p-4 shadow-[0_22px_70px_-35px_rgba(63,79,157,0.45)] dark:border-[#4f5b99] dark:from-[#1a2144] dark:via-[#1b1f3d] dark:to-[#1f2344] sm:rounded-[2rem] sm:p-6">
-        <div className="flex min-w-0 flex-col gap-4 sm:gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-col gap-4 sm:gap-5 2xl:flex-row 2xl:flex-wrap 2xl:items-start 2xl:justify-between 2xl:gap-x-8">
+          <div className="min-w-0 w-full 2xl:min-w-[min(100%,22rem)] 2xl:max-w-[40rem] 2xl:flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#9b7a4f] dark:text-[#d8bc94] sm:text-xs sm:tracking-[0.3em]">
               Dashboard
             </p>
@@ -1041,7 +1041,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className="flex w-full min-w-0 shrink-0 flex-col gap-3 sm:w-auto sm:max-w-full sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-x-3 sm:gap-y-3 2xl:w-auto 2xl:max-w-full 2xl:shrink-0 2xl:items-end 2xl:justify-end">
             <span className="inline-flex min-h-[2.75rem] w-fit items-center rounded-full border border-[#c5a67b]/60 bg-[#f4e6d0] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#725531] dark:border-[#5d4832] dark:bg-[#35281a] dark:text-[#e5c8a2] sm:min-h-0 sm:text-xs sm:tracking-[0.15em]">
               Role: {profileRole || "—"}
             </span>
@@ -1051,7 +1051,7 @@ export default function DashboardPage() {
                 setSelectedLokasi(event.target.value);
                 setSelectedUnit(UNIT_SEMUA);
               }}
-              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:w-auto sm:min-w-[11rem]"
+              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:flex-1 sm:basis-[11rem] sm:min-w-[11rem]"
             >
               {lokasiOptions.map((lokasi) => (
                 <option key={lokasi} value={lokasi}>
@@ -1062,7 +1062,7 @@ export default function DashboardPage() {
             <select
               value={selectedUnit}
               onChange={(event) => setSelectedUnit(event.target.value)}
-              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:w-auto sm:min-w-[11rem]"
+              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:flex-1 sm:basis-[11rem] sm:min-w-[11rem]"
             >
               <option value={UNIT_SEMUA}>{UNIT_SEMUA}</option>
               {unitOptions.map((unit) => (
@@ -1072,7 +1072,7 @@ export default function DashboardPage() {
               ))}
             </select>
             {isOwnerRole ? (
-              <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto">
+              <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-[1_1_16rem] sm:justify-end xl:flex-[2_1_20rem]">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8c6d47] dark:text-[#c9a77e]">
                   Bulan P&amp;L (keuangan)
                 </span>
@@ -1199,7 +1199,7 @@ export default function DashboardPage() {
             <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6d5a8a] dark:text-[#a8b0d4] sm:mb-3">
               Menu
             </p>
-            <div className="grid grid-cols-1 gap-2.5 min-[440px]:grid-cols-2 lg:grid-cols-4 lg:gap-3">
+            <div className="grid grid-cols-1 gap-2.5 min-[440px]:grid-cols-2 xl:grid-cols-4 xl:gap-3">
               {OWNER_DASHBOARD_MENU.map(
                 ({
                   id,
