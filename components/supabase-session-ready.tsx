@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { getSharedSupabaseClient } from "@/lib/supabase-browser";
+import { getSupabaseSessionSafe } from "@/lib/supabase-auth-api";
 
 const ReadyContext = createContext(false);
 
@@ -20,7 +21,7 @@ export function SupabaseSessionHydratedProvider({
       return;
     }
     let active = true;
-    void client.auth.getSession().then(() => {
+    void getSupabaseSessionSafe().then(() => {
       if (active) setReady(true);
     });
     const { data: sub } = client.auth.onAuthStateChange(() => {

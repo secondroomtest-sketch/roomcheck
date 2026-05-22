@@ -29,6 +29,7 @@ import { supabase } from "@/libsupabaseClient";
 import { normalizeUserProfileRole } from "@/lib/user-profile-role";
 import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
+import { getSupabaseSessionSafe, getSupabaseUserSafe } from "@/lib/supabase-auth-api";
 import { calendarDaysUntilCheckout } from "@/lib/checkout-dates";
 import { isExcludedFromOwnerDashboardRevenue } from "@/lib/finance-dashboard-revenue";
 import { pelaporanBulanIsoFromDbRecord } from "@/lib/finance-pelaporan-bulan-from-db";
@@ -38,7 +39,11 @@ import {
   financeUiRowsToReportRows,
   isManajemenPlFinanceUiRow,
 } from "@/lib/laporan-finance-breakdown";
-import { defaultPnlCalendarYm, financeRowCalendarYm } from "@/lib/finance-pnl-month";
+import {
+  defaultPnlCalendarYm,
+  financeRowCalendarYm,
+  resolveDefaultOwnerPnlMonth,
+} from "@/lib/finance-pnl-month";
 import { syncKamarRowsWithPenghuniList } from "@/lib/kamar-penghuni-sync";
 import type { PenghuniRow, SurveyCalonRow } from "@/components/penghuni-page-client";
 import type { FinanceRow } from "@/components/finance-page-client";
@@ -200,6 +205,59 @@ const PENGHUNI_LIST_FILTER_OPTIONS = [
   { value: "booking", label: "DAFTAR PENGHUNI BOOKING" },
 ] as const;
 
+/** Tema interaktif bergilir — dashboard khusus role owner. */
+const OWNER_LIST_CARD_THEMES = [
+  "border-violet-200/85 bg-gradient-to-br from-violet-50/95 via-white to-fuchsia-50/45 shadow-[0_6px_18px_-10px_rgba(139,92,246,0.2)] hover:border-violet-300/90 hover:shadow-[0_10px_24px_-8px_rgba(139,92,246,0.26)] dark:border-violet-800/45 dark:from-violet-950/30 dark:via-[#1a2144]/98 dark:to-fuchsia-950/20",
+  "border-emerald-200/85 bg-gradient-to-br from-emerald-50/95 via-white to-teal-50/40 shadow-[0_6px_18px_-10px_rgba(16,185,129,0.2)] hover:border-emerald-300/90 hover:shadow-[0_10px_24px_-8px_rgba(16,185,129,0.26)] dark:border-emerald-800/45 dark:from-emerald-950/30 dark:via-[#1a2144]/98 dark:to-teal-950/20",
+  "border-sky-200/85 bg-gradient-to-br from-sky-50/95 via-white to-cyan-50/45 shadow-[0_6px_18px_-10px_rgba(14,165,233,0.2)] hover:border-sky-300/90 hover:shadow-[0_10px_24px_-8px_rgba(14,165,233,0.26)] dark:border-sky-800/45 dark:from-sky-950/30 dark:via-[#1a2144]/98 dark:to-cyan-950/20",
+  "border-amber-200/85 bg-gradient-to-br from-amber-50/95 via-white to-yellow-50/40 shadow-[0_6px_18px_-10px_rgba(245,158,11,0.2)] hover:border-amber-300/90 hover:shadow-[0_10px_24px_-8px_rgba(245,158,11,0.26)] dark:border-amber-800/45 dark:from-amber-950/28 dark:via-[#1a2144]/98 dark:to-yellow-950/18",
+  "border-rose-200/85 bg-gradient-to-br from-rose-50/95 via-white to-orange-50/50 shadow-[0_6px_18px_-10px_rgba(244,63,94,0.22)] hover:border-rose-300/90 hover:shadow-[0_10px_24px_-8px_rgba(244,63,94,0.28)] dark:border-rose-800/45 dark:from-rose-950/35 dark:via-[#1a2144]/98 dark:to-orange-950/25",
+  "border-indigo-200/85 bg-gradient-to-br from-indigo-50/95 via-white to-blue-50/45 shadow-[0_6px_18px_-10px_rgba(99,102,241,0.2)] hover:border-indigo-300/90 hover:shadow-[0_10px_24px_-8px_rgba(99,102,241,0.26)] dark:border-indigo-800/45 dark:from-indigo-950/30 dark:via-[#1a2144]/98 dark:to-blue-950/22",
+] as const;
+
+const OWNER_TABLE_ROW_THEMES = [
+  "bg-violet-50/70 hover:bg-violet-50 dark:bg-violet-950/20 dark:hover:bg-violet-950/35",
+  "bg-emerald-50/65 hover:bg-emerald-50 dark:bg-emerald-950/18 dark:hover:bg-emerald-950/32",
+  "bg-sky-50/65 hover:bg-sky-50 dark:bg-sky-950/18 dark:hover:bg-sky-950/32",
+  "bg-amber-50/60 hover:bg-amber-50 dark:bg-amber-950/16 dark:hover:bg-amber-950/28",
+  "bg-rose-50/70 hover:bg-rose-50 dark:bg-rose-950/20 dark:hover:bg-rose-950/35",
+  "bg-indigo-50/65 hover:bg-indigo-50 dark:bg-indigo-950/18 dark:hover:bg-indigo-950/32",
+] as const;
+
+const OWNER_METRIC_CARD_THEMES = [
+  "border-violet-200/85 bg-gradient-to-br from-violet-50/95 via-white to-fuchsia-50/40 shadow-[0_8px_26px_-12px_rgba(139,92,246,0.28)] hover:border-violet-300 hover:shadow-[0_14px_36px_-12px_rgba(139,92,246,0.35)] dark:border-violet-800/50 dark:from-violet-950/35 dark:to-[#1a2144]/95",
+  "border-emerald-200/85 bg-gradient-to-br from-emerald-50/95 via-white to-teal-50/35 shadow-[0_8px_26px_-12px_rgba(16,185,129,0.26)] hover:border-emerald-300 hover:shadow-[0_14px_36px_-12px_rgba(16,185,129,0.32)] dark:border-emerald-800/50 dark:from-emerald-950/32 dark:to-[#1a2144]/95",
+  "border-sky-200/85 bg-gradient-to-br from-sky-50/95 via-white to-cyan-50/35 shadow-[0_8px_26px_-12px_rgba(14,165,233,0.26)] hover:border-sky-300 hover:shadow-[0_14px_36px_-12px_rgba(14,165,233,0.32)] dark:border-sky-800/50 dark:from-sky-950/30 dark:to-[#1a2144]/95",
+  "border-amber-200/85 bg-gradient-to-br from-amber-50/95 via-white to-yellow-50/30 shadow-[0_8px_26px_-12px_rgba(245,158,11,0.24)] hover:border-amber-300 hover:shadow-[0_14px_36px_-12px_rgba(245,158,11,0.3)] dark:border-amber-800/50 dark:from-amber-950/28 dark:to-[#1a2144]/95",
+  "border-rose-200/85 bg-gradient-to-br from-rose-50/95 via-white to-orange-50/35 shadow-[0_8px_26px_-12px_rgba(244,63,94,0.26)] hover:border-rose-300 hover:shadow-[0_14px_36px_-12px_rgba(244,63,94,0.32)] dark:border-rose-800/50 dark:from-rose-950/32 dark:to-[#1a2144]/95",
+] as const;
+
+const OWNER_SECTION_ARTICLE_THEMES = [
+  "border-violet-200/75 bg-gradient-to-br from-violet-50/25 via-white/95 to-white/90 ring-1 ring-violet-200/50 dark:border-violet-800/45 dark:from-violet-950/20 dark:via-[#1a2144]/95 dark:to-[#1a2144]/95 dark:ring-violet-800/35",
+  "border-emerald-200/75 bg-gradient-to-br from-emerald-50/25 via-white/95 to-white/90 ring-1 ring-emerald-200/50 dark:border-emerald-800/45 dark:from-emerald-950/18 dark:via-[#1a2144]/95 dark:to-[#1a2144]/95 dark:ring-emerald-800/35",
+  "border-sky-200/75 bg-gradient-to-br from-sky-50/25 via-white/95 to-white/90 ring-1 ring-sky-200/50 dark:border-sky-800/45 dark:from-sky-950/18 dark:via-[#1a2144]/95 dark:to-[#1a2144]/95 dark:ring-sky-800/35",
+  "border-amber-200/75 bg-gradient-to-br from-amber-50/25 via-white/95 to-white/90 ring-1 ring-amber-200/50 dark:border-amber-800/45 dark:from-amber-950/16 dark:via-[#1a2144]/95 dark:to-[#1a2144]/95 dark:ring-amber-800/35",
+] as const;
+
+const OWNER_INTERACTIVE_MOTION =
+  "transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:hover:translate-y-0";
+
+function ownerListCardTheme(index: number): string {
+  return OWNER_LIST_CARD_THEMES[index % OWNER_LIST_CARD_THEMES.length];
+}
+
+function ownerTableRowTheme(index: number): string {
+  return OWNER_TABLE_ROW_THEMES[index % OWNER_TABLE_ROW_THEMES.length];
+}
+
+function ownerMetricCardTheme(index: number): string {
+  return OWNER_METRIC_CARD_THEMES[index % OWNER_METRIC_CARD_THEMES.length];
+}
+
+function ownerSectionArticleTheme(index: number): string {
+  return OWNER_SECTION_ARTICLE_THEMES[index % OWNER_SECTION_ARTICLE_THEMES.length];
+}
+
 type PenghuniListFilter = (typeof PENGHUNI_LIST_FILTER_OPTIONS)[number]["value"];
 
 type OwnerDashboardMenuId = "ringkasan" | "penghuni" | "pl" | "finance";
@@ -235,7 +293,7 @@ const OWNER_DASHBOARD_MENU: {
   {
     id: "penghuni",
     title: "Daftar Penghuni",
-    description: "Data penghuni, peringatan checkout, dan calon survey.",
+    description: "Data penghuni, peringatan checkout, dan list survey calon penghuni.",
     Icon: Users,
     cardIdle:
       "border-violet-200/85 bg-gradient-to-br from-violet-50/95 via-white to-[#f5f0ff] shadow-[0_12px_32px_-10px_rgba(167,139,250,0.28),0_4px_16px_-6px_rgba(30,41,59,0.1),inset_0_1px_0_0_rgba(255,255,255,0.85)] dark:border-violet-800/45 dark:from-[#251a32] dark:via-[#16121e] dark:to-[#201830] dark:shadow-[0_14px_40px_-10px_rgba(0,0,0,0.58),0_6px_20px_-10px_rgba(167,139,250,0.18),inset_0_1px_0_0_rgba(255,255,255,0.07)]",
@@ -353,10 +411,15 @@ export default function DashboardPage() {
   const [cloudDataError, setCloudDataError] = useState("");
   const masterRowCountsRef = useRef({ lokasi: 0, blok: 0 });
   const warnedEmptyOperationalRef = useRef(false);
+  const ownerPnlMonthBootstrappedRef = useRef(false);
 
   useEffect(() => {
     warnedEmptyOperationalRef.current = false;
   }, [cloudSyncTick]);
+
+  useEffect(() => {
+    ownerPnlMonthBootstrappedRef.current = false;
+  }, [sessionUserId, localDemoMode]);
 
   useEffect(() => {
     if (localDemoMode) {
@@ -365,15 +428,17 @@ export default function DashboardPage() {
       setProfileRole(normalizeUserProfileRole(demo?.role));
       setAksesLokasiIds(demo?.aksesLokasi ?? []);
       setAksesBlokIds(demo?.aksesBlok ?? []);
+      if (!ownerPnlMonthBootstrappedRef.current) {
+        ownerPnlMonthBootstrappedRef.current = true;
+        setOwnerPnlMonth(resolveDefaultOwnerPnlMonth({ email: demo?.email }));
+      }
       setProfileLoaded(true);
       return;
     }
     let cancelled = false;
     const loadProfile = async () => {
       if (!sessionHydrated) return;
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getSupabaseUserSafe();
       if (cancelled) return;
       if (!user) {
         setSessionUserId(null);
@@ -386,7 +451,7 @@ export default function DashboardPage() {
       setSessionUserId(user.id);
       const { data: profileRows, error: profileErr } = await supabase
         .from("user_profiles")
-        .select("role, akses_lokasi, akses_blok")
+        .select("role, akses_lokasi, akses_blok, username")
         .eq("id", user.id);
       if (cancelled) return;
       if (profileErr) {
@@ -414,6 +479,15 @@ export default function DashboardPage() {
       const ab = rec.akses_blok;
       setAksesLokasiIds(Array.isArray(al) ? al.map((x) => String(x)) : []);
       setAksesBlokIds(Array.isArray(ab) ? ab.map((x) => String(x)) : []);
+      if (!ownerPnlMonthBootstrappedRef.current) {
+        ownerPnlMonthBootstrappedRef.current = true;
+        setOwnerPnlMonth(
+          resolveDefaultOwnerPnlMonth({
+            username: rec.username != null ? String(rec.username) : null,
+            email: user.email,
+          })
+        );
+      }
       setProfileLoaded(true);
     };
     void loadProfile();
@@ -438,9 +512,7 @@ export default function DashboardPage() {
     let cancelled = false;
     const loadMaster = async () => {
       if (!sessionHydrated) return;
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getSupabaseSessionSafe();
       if (!session?.user) {
         if (!cancelled) {
           setCloudLokasi([]);
@@ -558,10 +630,7 @@ export default function DashboardPage() {
     });
     const loadCloudRows = async () => {
       if (!sessionHydrated) return;
-      await supabase.auth.refreshSession().catch(() => undefined);
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getSupabaseSessionSafe();
       if (!session?.user) {
         setCloudDataError("Tidak ada sesi aktif. Silakan login ulang.");
         return;
@@ -766,7 +835,7 @@ export default function DashboardPage() {
     if (ownerNoDataForMonth && ownerPnlToastKeyRef.current !== key) {
       ownerPnlToastKeyRef.current = key;
       toast(
-        `Tidak ada transaksi kos (tanpa manajemen) untuk P&L bulan ${ownerPnlMonth} pada filter ini. Opsional: sesuaikan bulan P&L.`,
+        `Tidak ada transaksi kos untuk P&L bulan ${ownerPnlMonth} pada filter ini. Opsional: sesuaikan bulan P&L.`,
         "info",
       );
     }
@@ -865,6 +934,20 @@ export default function DashboardPage() {
     return { total, terisi, kosong, maintenance, pct };
   }, [kamarRowsFiltered]);
 
+  const maintenanceKamarDetail = useMemo(() => {
+    return kamarRowsFiltered
+      .filter((k) => k.status === "Maintenance")
+      .map((k) => {
+        const lokasi = String(k.lokasiKos ?? "").trim();
+        const unit = String(k.unitBlok ?? "").trim();
+        const no = String(k.noKamar ?? "").trim();
+        const label = [lokasi, unit, no ? `Kamar ${no}` : ""].filter(Boolean).join(" · ") || "—";
+        const keterangan = String(k.keterangan ?? "").trim();
+        return { id: k.id, label, keterangan };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, "id"));
+  }, [kamarRowsFiltered]);
+
   const financeRowsForDashboardPl = isOwnerRole ? financeRowsForOwnerPlDisplay : financeRowsScoped;
 
   const dashboardPlBreakdown = useMemo(() => {
@@ -888,7 +971,7 @@ export default function DashboardPage() {
       note: isOwnerRole
         ? ownerNoDataForMonth
           ? `P&L ${ownerPnlMonth} — tidak ada data pada filter ini`
-          : `${revenueRows.length} trx · deposit/booking tidak dijumlahkan · bukan laba (lihat P&L di bawah)`
+          : "Gross Revenue Bulanan"
         : `${revenueRows.length} transaksi pemasukan · P&L mengikuti filter lokasi/unit`,
     };
   }, [financeRowsForOwnerPnl, financeRowsForOwnerPlDisplay, isOwnerRole, ownerNoDataForMonth, ownerPnlMonth]);
@@ -961,13 +1044,11 @@ export default function DashboardPage() {
       );
     }
     if (isOwnerRole) {
-      rows = rows.filter(
-        (f) =>
-          financeRowCalendarYm(f) === ownerPnlMonth && !isManajemenPlFinanceUiRow(f)
-      );
+      rows = rows.filter((f) => financeRowCalendarYm(f) === ownerPnlMonth);
     }
     return rows
       .filter((f) => f.kategori === "Pengeluaran")
+      .filter((f) => !isOwnerRole || normalizePengeluaranScope(f.pengeluaranScope) !== "manajemen")
       .map((f) => ({
         id: f.id,
         kategori: f.pos || f.keterangan || "Pengeluaran",
@@ -1001,16 +1082,6 @@ export default function DashboardPage() {
     () => displayPengeluaran.reduce((s, r) => s + Number(String(r.nominal).replace(/[^\d]/g, "") || 0), 0),
     [displayPengeluaran]
   );
-  const displayPengeluaranSplit = useMemo(() => {
-    let kos = 0;
-    let manajemen = 0;
-    for (const r of displayPengeluaran) {
-      const n = Number(String(r.nominal).replace(/\D/g, "") || 0);
-      if (r.lingkup === "Manajemen") manajemen += n;
-      else kos += n;
-    }
-    return { kos, manajemen };
-  }, [displayPengeluaran]);
   const totalPemasukanNominal = useMemo(
     () => displayPemasukan.reduce((s, r) => s + Number(String(r.nominal).replace(/[^\d]/g, "") || 0), 0),
     [displayPemasukan]
@@ -1123,7 +1194,7 @@ export default function DashboardPage() {
         ) : null}
         {isOwnerRole && ownerNoDataForMonth ? (
           <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-            Tidak ada transaksi <strong className="font-semibold">kos</strong> (bukan manajemen) untuk P&amp;L bulan{' '}
+            Tidak ada transaksi <strong className="font-semibold">kos</strong> untuk P&amp;L bulan{' '}
             <strong className="font-semibold">{ownerPnlMonth}</strong> pada filter lokasi/unit. Penghuni &amp; okupansi
             mengikuti filter lokasi/unit; ubah pemilih bulan P&amp;L untuk melihat periode lain.
           </p>
@@ -1265,7 +1336,11 @@ export default function DashboardPage() {
       >
       <section className="grid min-w-0 grid-cols-1 gap-3 p-0.5 sm:grid-cols-2 sm:gap-4 sm:p-1 md:grid-cols-3 xl:grid-cols-5">
         <article
-          className={`min-w-0 rounded-2xl border border-[#d6ddff] bg-[#f7f8ff] p-4 transition-shadow dark:border-[#4f5b99] dark:bg-[#1a2144] sm:rounded-[1.7rem] sm:p-5 ${isOwnerRole ? "shadow-[0_8px_30px_-12px_rgba(140,107,67,0.35)] hover:shadow-[0_14px_40px_-14px_rgba(140,107,67,0.45)] motion-reduce:transition-none motion-reduce:hover:shadow-none" : ""}`}
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.7rem] sm:p-5 ${
+            isOwnerRole
+              ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(0)}`
+              : "border-[#d6ddff] bg-[#f7f8ff] dark:border-[#4f5b99] dark:bg-[#1a2144]"
+          }`}
         >
           <div className="flex items-center gap-2">
             <BedDouble size={16} className={iconTone.brand} />
@@ -1292,7 +1367,11 @@ export default function DashboardPage() {
         </article>
 
         <article
-          className={`min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5 ${isOwnerRole ? "transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0" : ""}`}
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.7rem] sm:p-5 ${
+            isOwnerRole
+              ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(1)}`
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
         >
           <div className="flex items-center gap-2">
             <BadgeDollarSign size={16} className={iconTone.info} />
@@ -1307,7 +1386,13 @@ export default function DashboardPage() {
           <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">{dashboardRevenue.note}</p>
         </article>
 
-        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5">
+        <article
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.7rem] sm:p-5 ${
+            isOwnerRole
+              ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(2)}`
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
+        >
           <div className="flex items-center gap-2">
             <Building2 size={16} className={iconTone.brand} />
             <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
@@ -1322,7 +1407,13 @@ export default function DashboardPage() {
           </p>
         </article>
 
-        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5">
+        <article
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.7rem] sm:p-5 ${
+            isOwnerRole
+              ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(3)}`
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
+        >
           <div className="flex items-center gap-2">
             <CheckCircle2 size={16} className={iconTone.success} />
             <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
@@ -1337,7 +1428,13 @@ export default function DashboardPage() {
           </p>
         </article>
 
-        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.7rem] sm:p-5">
+        <article
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.7rem] sm:p-5 ${
+            isOwnerRole
+              ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(4)}`
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
+        >
           <div className="flex items-center gap-2">
             <Wrench size={16} className={iconTone.danger} />
             <p className="text-xs uppercase tracking-[0.2em] text-[#8d704a] dark:text-[#cbab7c]">
@@ -1347,9 +1444,30 @@ export default function DashboardPage() {
           <p className="mt-3 text-2xl font-semibold tabular-nums text-[#2e2318] dark:text-[#f7e9d5] sm:text-3xl">
             {dashboardKamarStats.maintenance}
           </p>
-          <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">
-            Sedang tidak disewakan
-          </p>
+          <div className="mt-3 border-t border-rose-200/60 pt-3 dark:border-rose-900/35">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9a4a42] dark:text-[#e8b4b4]">
+              Keterangan kamar maintenance
+            </p>
+            {maintenanceKamarDetail.length === 0 ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#bfa27f] sm:text-xs">
+                Tidak ada kamar berstatus Maintenance pada filter ini.
+              </p>
+            ) : (
+              <ul className="mt-2 max-h-28 space-y-2 overflow-y-auto text-[11px] leading-snug sm:max-h-32 sm:text-xs">
+                {maintenanceKamarDetail.map((item) => (
+                  <li
+                    key={item.id}
+                    className="rounded-lg border border-rose-200/55 bg-white/75 px-2.5 py-2 dark:border-rose-900/40 dark:bg-[#1a2144]/80"
+                  >
+                    <p className="font-semibold text-[#2d2217] dark:text-[#f6e9d5]">{item.label}</p>
+                    <p className="mt-0.5 text-[#7d6042] dark:text-[#bfa27f]">
+                      {item.keterangan || "— Belum ada keterangan di data kamar."}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </article>
       </section>
       </div>
@@ -1358,7 +1476,11 @@ export default function DashboardPage() {
       {showOwnerPlBlock ? (
       <div id="dashboard-owner-finance" className="min-w-0 scroll-mt-[4.75rem] sm:scroll-mt-24">
       <section
-        className={`min-w-0 rounded-xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 to-white/95 p-3 transition-shadow dark:border-emerald-900/35 dark:from-emerald-950/30 dark:to-[#1a2144]/90 sm:rounded-[1.5rem] sm:p-4 ${isOwnerRole ? "ring-1 ring-emerald-200/60 dark:ring-emerald-800/40" : ""}`}
+        className={`min-w-0 rounded-xl border p-3 sm:rounded-[1.5rem] sm:p-4 ${
+          isOwnerRole
+            ? `${ownerSectionArticleTheme(1)} ${OWNER_INTERACTIVE_MOTION}`
+            : "border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 to-white/95 transition-shadow dark:border-emerald-900/35 dark:from-emerald-950/30 dark:to-[#1a2144]/90"
+        }`}
       >
         {isOwnerRole ? (
           <button
@@ -1371,8 +1493,8 @@ export default function DashboardPage() {
                 Ringkasan P&amp;L bulan {ownerPnlMonth}
               </p>
               <p className="mt-1 text-[10px] leading-relaxed text-[#5d7349] dark:text-[#b8cfa8] sm:text-[11px] sm:leading-snug">
-                Ketuk untuk membuka atau menutup detail. Hanya P&amp;L <strong>kost</strong> — transaksi manajemen tidak
-                ditampilkan untuk akun owner. Mengikuti filter lokasi/unit di atas.
+                Ketuk untuk membuka atau menutup detail. Ringkasan laba rugi kost mengikuti filter lokasi/unit dan bulan P&amp;L
+                di atas.
               </p>
             </div>
             <ChevronDown
@@ -1394,16 +1516,76 @@ export default function DashboardPage() {
         )}
         {(!isOwnerRole || ownerPlSectionOpen) ? (
           <div
-            className={`mt-3 grid grid-cols-1 gap-2.5 sm:gap-3 ${isOwnerRole ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-4"}`}
+            className={`mt-3 grid grid-cols-1 gap-2.5 sm:gap-3 ${isOwnerRole ? "sm:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-4"}`}
           >
-            <div className="min-w-0 break-words rounded-2xl border border-emerald-200/70 bg-white/90 px-3 py-2.5 dark:border-emerald-900/45 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#647856] dark:text-[#aabf9e] sm:text-[10px] sm:tracking-[0.14em]">
+            {/* Kiri → kanan: masuk, keluar (tengah), hasil P&amp;L */}
+            <div
+              className={`min-w-0 break-words rounded-2xl border px-3 py-2.5 sm:px-4 sm:py-3 ${
+                isOwnerRole
+                  ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(0)}`
+                  : "border-emerald-200/85 bg-gradient-to-br from-emerald-50/95 to-white/90 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.7)] dark:border-emerald-800/45 dark:from-emerald-950/30 dark:to-[#1b2240]/95"
+              }`}
+            >
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-emerald-900/90 dark:text-emerald-200/85 sm:text-[10px] sm:tracking-[0.14em]">
+                {isOwnerRole ? "Pemasukan kos (sewa kamar)" : "Total pemasukan (laporan)"}
+              </p>
+              <p className="mt-1 text-[13px] font-semibold tabular-nums leading-tight tracking-tight text-emerald-950 dark:text-emerald-50 sm:text-sm">
+                Rp{" "}
+                {(isOwnerRole
+                  ? dashboardPlBreakdown.pemasukanKosTotal
+                  : dashboardPlBreakdown.pemasukanTotal
+                ).toLocaleString("id-ID")}
+              </p>
+              <p className="mt-1 text-[9px] leading-snug text-emerald-900/75 dark:text-emerald-200/75 sm:text-[10px]">
+                {isOwnerRole ? (
+                  <>Hanya pemasukan sewa kamar (P&amp;L kos) · bulan {ownerPnlMonth}</>
+                ) : (
+                  <>Sewa + margin (seluruh POS pemasukan pada filter)</>
+                )}
+              </p>
+            </div>
+            <div
+              className={`min-w-0 break-words rounded-2xl border px-3 py-2.5 sm:px-4 sm:py-3 ${
+                isOwnerRole
+                  ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(1)}`
+                  : "border-rose-200/85 bg-gradient-to-br from-rose-50/95 to-white/90 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.7)] dark:border-rose-800/50 dark:from-rose-950/35 dark:to-[#1b2240]/95"
+              }`}
+            >
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-rose-800/90 dark:text-rose-200/85 sm:text-[10px] sm:tracking-[0.14em]">
+                {isOwnerRole ? "Pengeluaran kos" : "Gabungan pengeluaran"}
+              </p>
+              <p className="mt-1 text-[13px] font-semibold tabular-nums leading-tight tracking-tight text-rose-950 dark:text-rose-50 sm:text-sm">
+                Rp{" "}
+                {(isOwnerRole
+                  ? dashboardPlBreakdown.pengeluaranKosTotal
+                  : dashboardPlBreakdown.pengeluaranTotal
+                ).toLocaleString("id-ID")}
+              </p>
+              <p className="mt-1 text-[9px] leading-snug text-rose-800/80 dark:text-rose-200/75 sm:text-[10px]">
+                {isOwnerRole ? (
+                  <>Pengeluaran kos (termasuk IPL &amp; Manajemen Fee) · bulan {ownerPnlMonth}</>
+                ) : (
+                  <>
+                    Kos Rp {dashboardPlBreakdown.pengeluaranKosTotal.toLocaleString("id-ID")} · Manaj. Rp{" "}
+                    {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
+                  </>
+                )}
+              </p>
+            </div>
+            <div
+              className={`min-w-0 break-words rounded-2xl border px-3 py-2.5 sm:px-4 sm:py-3 ${
+                isOwnerRole
+                  ? `${OWNER_INTERACTIVE_MOTION} ${ownerMetricCardTheme(2)}`
+                  : "border-violet-200/85 bg-gradient-to-br from-violet-50/95 to-white/90 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.75)] dark:border-violet-800/50 dark:from-violet-950/35 dark:to-[#1b2240]/95"
+              }`}
+            >
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-violet-900/85 dark:text-violet-200/90 sm:text-[10px] sm:tracking-[0.14em]">
                 P&amp;L kos
               </p>
-              <p className="mt-1 text-lg font-semibold tabular-nums leading-tight text-emerald-900 dark:text-emerald-100 sm:text-xl">
+              <p className="mt-1 text-lg font-semibold tabular-nums leading-tight text-violet-950 dark:text-violet-50 sm:text-xl">
                 Rp {dashboardPlBreakdown.plKosNominal.toLocaleString("id-ID")}
               </p>
-              <p className="mt-1 text-[9px] leading-snug text-[#647856] dark:text-[#aabf9e] sm:text-[10px]">
+              <p className="mt-1 text-[9px] leading-snug text-violet-900/75 dark:text-violet-200/80 sm:text-[10px]">
                 Masuk kos Rp {dashboardPlBreakdown.pemasukanKosTotal.toLocaleString("id-ID")} − keluar kos Rp{" "}
                 {dashboardPlBreakdown.pengeluaranKosTotal.toLocaleString("id-ID")}
               </p>
@@ -1422,39 +1604,6 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : null}
-            <div className="min-w-0 break-words rounded-2xl border border-slate-200/80 bg-white/90 px-3 py-2.5 dark:border-slate-700/60 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px] sm:tracking-[0.14em]">
-                {isOwnerRole ? "Pengeluaran kos" : "Gabungan pengeluaran"}
-              </p>
-              <p className="mt-1 text-[13px] font-semibold tabular-nums leading-tight tracking-tight text-[#2e2318] dark:text-[#f0e6d8] sm:text-sm">
-                Rp {dashboardPlBreakdown.pengeluaranTotal.toLocaleString("id-ID")}
-              </p>
-              <p className="mt-1 text-[9px] leading-snug text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px]">
-                {isOwnerRole ? (
-                  <>Hanya pengeluaran dengan lingkup kos · bulan {ownerPnlMonth}</>
-                ) : (
-                  <>
-                    Kos Rp {dashboardPlBreakdown.pengeluaranKosTotal.toLocaleString("id-ID")} · Manaj. Rp{" "}
-                    {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
-                  </>
-                )}
-              </p>
-            </div>
-            <div className="min-w-0 break-words rounded-2xl border border-slate-200/80 bg-white/90 px-3 py-2.5 dark:border-slate-700/60 dark:bg-[#1b2240]/95 sm:px-4 sm:py-3">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px] sm:tracking-[0.14em]">
-                {isOwnerRole ? "Pemasukan kos (sewa kamar)" : "Total pemasukan (laporan)"}
-              </p>
-              <p className="mt-1 text-[13px] font-semibold tabular-nums leading-tight tracking-tight text-[#2e2318] dark:text-[#f0e6d8] sm:text-sm">
-                Rp {dashboardPlBreakdown.pemasukanTotal.toLocaleString("id-ID")}
-              </p>
-              <p className="mt-1 text-[9px] leading-snug text-[#5c6470] dark:text-[#a8b0bc] sm:text-[10px]">
-                {isOwnerRole ? (
-                  <>Hanya POS pemasukan yang dihitung sebagai kos (Sewa kamar) · bulan {ownerPnlMonth}</>
-                ) : (
-                  <>Sewa + margin (seluruh POS pemasukan pada filter)</>
-                )}
-              </p>
-            </div>
           </div>
         ) : (
           <p className="mt-3 rounded-xl border border-emerald-200/60 bg-emerald-50/50 px-3 py-2 text-[11px] text-emerald-900/90 dark:border-emerald-800/50 dark:bg-emerald-950/25 dark:text-emerald-100/90">
@@ -1466,12 +1615,18 @@ export default function DashboardPage() {
       ) : null}
 
       {showOwnerPenghuniSection ? (
-      <section className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 dark:border-amber-800/40 dark:bg-amber-950/25 sm:rounded-[1.5rem] sm:p-4">
+      <section
+        className={`rounded-xl border p-3 sm:rounded-[1.5rem] sm:p-4 ${
+          isOwnerRole
+            ? `${OWNER_INTERACTIVE_MOTION} ${ownerListCardTheme(2)}`
+            : "border-amber-200/80 bg-amber-50/50 dark:border-amber-800/40 dark:bg-amber-950/25"
+        }`}
+      >
         <div className="flex flex-col gap-2 min-[380px]:flex-row min-[380px]:flex-wrap min-[380px]:items-center">
           <div className="flex flex-wrap items-center gap-2">
             <ClipboardList size={16} className={`shrink-0 ${iconTone.warning}`} />
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8f6a2d] dark:text-[#dcb97a] sm:text-xs sm:tracking-[0.18em]">
-              Calon survey
+              List Survey Calon penghuni
             </p>
             <span className="rounded-full border border-amber-300/80 bg-white/90 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 sm:text-sm">
               {surveyDashboardRows.length}
@@ -1489,7 +1644,11 @@ export default function DashboardPage() {
         {showOwnerPenghuniSection ? (
         <article
           id="dashboard-owner-operational"
-          className={`min-w-0 scroll-mt-[4.75rem] rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:scroll-mt-24 sm:rounded-[1.8rem] sm:p-5 ${isOwnerRole ? "ring-1 ring-[#dac3a5]/55 dark:ring-[#56422e]/55" : ""}`}
+          className={`min-w-0 scroll-mt-[4.75rem] rounded-2xl border p-4 sm:scroll-mt-24 sm:rounded-[1.8rem] sm:p-5 ${
+            isOwnerRole
+              ? ownerSectionArticleTheme(0)
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
         >
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <SectionTitleWithIcon
@@ -1531,10 +1690,14 @@ export default function DashboardPage() {
                 Mengikuti filter lokasi/unit di atas. Toast peringatan checkout muncul lagi setiap kali halaman dashboard dimuat ulang (refresh), jika ada penghuni dalam jendela ini.
               </p>
               <ul className="max-h-48 space-y-2 overflow-y-auto text-sm">
-                {checkoutNoticeEntries.map(({ row, days }) => (
+                {checkoutNoticeEntries.map(({ row, days }, index) => (
                   <li
                     key={row.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#eadcc9] bg-white/90 px-3 py-2 dark:border-[#3d2f22] dark:bg-[#2a2016]/90"
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 ${
+                      isOwnerRole
+                        ? `${OWNER_INTERACTIVE_MOTION} ${ownerListCardTheme(index)}`
+                        : "border-[#eadcc9] bg-white/90 dark:border-[#3d2f22] dark:bg-[#2a2016]/90"
+                    }`}
                   >
                     <span className="font-medium text-[#2d2217] dark:text-[#f6e9d5]">{row.namaLengkap}</span>
                     <span className="text-xs text-[#6e5336] dark:text-[#bfa27f]">
@@ -1555,10 +1718,14 @@ export default function DashboardPage() {
           ) : null}
 
           <div className="space-y-3 md:hidden">
-            {displayPenghuni.map((row) => (
+            {displayPenghuni.map((row, index) => (
               <div
                 key={row.id}
-                className="rounded-xl border border-[#ecdcc6]/90 bg-gradient-to-b from-white/95 to-[#fffdf9]/90 p-3 shadow-sm dark:border-[#3f3023] dark:from-[#1a2144]/95 dark:to-[#151a36]/95"
+                className={`rounded-xl border p-3 ${
+                  isOwnerRole
+                    ? `${OWNER_INTERACTIVE_MOTION} ${ownerListCardTheme(index)}`
+                    : "border-[#ecdcc6]/90 bg-gradient-to-b from-white/95 to-[#fffdf9]/90 shadow-sm dark:border-[#3f3023] dark:from-[#1a2144]/95 dark:to-[#151a36]/95"
+                }`}
               >
                 <div className="flex items-start justify-between gap-2 border-b border-[#ecdcc6]/60 pb-2.5 dark:border-[#3a467f]/55">
                   <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">
@@ -1646,10 +1813,10 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayPenghuni.map((row) => (
+                {displayPenghuni.map((row, index) => (
                   <tr
                     key={row.id}
-                    className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
+                    className={`border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
                   >
                     <td className="px-3 py-3">{row.nama}</td>
                     <td className="whitespace-nowrap px-3 py-3">{row.unit}</td>
@@ -1704,11 +1871,17 @@ export default function DashboardPage() {
         ) : null}
 
         {showOwnerPenghuniSection ? (
-        <article className="min-w-0 rounded-2xl border border-violet-200/80 bg-gradient-to-br from-[#f3f1ff]/90 to-white/95 p-4 dark:border-[#4f5b99] dark:from-[#1f2344] dark:to-[#1a2144]/95 sm:rounded-[1.8rem] sm:p-5">
+        <article
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.8rem] sm:p-5 ${
+            isOwnerRole
+              ? ownerSectionArticleTheme(1)
+              : "border-violet-200/80 bg-gradient-to-br from-[#f3f1ff]/90 to-white/95 dark:border-[#4f5b99] dark:from-[#1f2344] dark:to-[#1a2144]/95"
+          }`}
+        >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <SectionTitleWithIcon
               icon={ClipboardList}
-              title="Calon survey"
+              title="List Survey Calon penghuni"
               className="text-[#2d2217] dark:text-[#f6e9d5]"
               iconClassName={iconTone.warning}
             />
@@ -1717,10 +1890,14 @@ export default function DashboardPage() {
             Data dari form Survey Baru di halaman Penghuni; urut berdasarkan rencana check-in; mengikuti filter lokasi/unit di atas.
           </p>
           <div className="space-y-3 md:hidden">
-            {surveyDashboardRows.map((row) => (
+            {surveyDashboardRows.map((row, index) => (
               <div
                 key={row.id}
-                className="rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white/95 p-3 shadow-sm dark:border-amber-800/35 dark:from-[#2a2215]/95 dark:to-[#1f2344]/95"
+                className={`rounded-xl border p-3 ${
+                  isOwnerRole
+                    ? `${OWNER_INTERACTIVE_MOTION} ${ownerListCardTheme(index)}`
+                    : "border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white/95 shadow-sm dark:border-amber-800/35 dark:from-[#2a2215]/95 dark:to-[#1f2344]/95"
+                }`}
               >
                 <p className="text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">{row.namaLengkap}</p>
                 <dl className="mt-2.5 space-y-2 border-t border-amber-200/50 pt-2.5 text-xs dark:border-amber-800/35">
@@ -1746,10 +1923,10 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f6a2d] dark:text-[#dcb97a]">
-                      WA
+                      Keterangan
                     </dt>
-                    <dd className="min-w-0 break-all text-right font-medium text-[#2d2217] dark:text-[#f6e9d5]">
-                      {row.noWa || "—"}
+                    <dd className="min-w-0 max-w-[65%] break-words text-right font-medium text-[#2d2217] dark:text-[#f6e9d5]">
+                      {row.keterangan?.trim() || "—"}
                     </dd>
                   </div>
                 </dl>
@@ -1771,14 +1948,14 @@ export default function DashboardPage() {
                   <th className="whitespace-nowrap px-3 py-3">Unit</th>
                   <th className="whitespace-nowrap px-3 py-3">Rencana check-in</th>
                   <th className="whitespace-nowrap px-3 py-3">Negosiasi</th>
-                  <th className="whitespace-nowrap px-3 py-3">WA</th>
+                  <th className="whitespace-nowrap px-3 py-3">Keterangan</th>
                 </tr>
               </thead>
               <tbody>
-                {surveyDashboardRows.map((row) => (
+                {surveyDashboardRows.map((row, index) => (
                   <tr
                     key={row.id}
-                    className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
+                    className={`border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
                   >
                     <td className="px-3 py-3">{row.namaLengkap}</td>
                     <td className="whitespace-nowrap px-3 py-3">{row.unitBlok}</td>
@@ -1786,7 +1963,7 @@ export default function DashboardPage() {
                     <td className="whitespace-nowrap px-3 py-3 tabular-nums">
                       {row.negosiasiHarga ? `Rp ${row.negosiasiHarga}` : "—"}
                     </td>
-                    <td className="max-w-[12rem] break-all px-3 py-3">{row.noWa || "—"}</td>
+                    <td className="max-w-[16rem] break-words px-3 py-3">{row.keterangan?.trim() || "—"}</td>
                   </tr>
                 ))}
                 {surveyDashboardRows.length === 0 ? (
@@ -1810,7 +1987,13 @@ export default function DashboardPage() {
         ) : null}
 
         {showOwnerFinanceDetail ? (
-        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.8rem] sm:p-5">
+        <article
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.8rem] sm:p-5 ${
+            isOwnerRole
+              ? ownerSectionArticleTheme(2)
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
+        >
           <SectionTitleWithIcon
             icon={AlertTriangle}
             title="Tabel Pengeluaran"
@@ -1818,26 +2001,28 @@ export default function DashboardPage() {
             iconClassName={iconTone.warning}
           />
           <div className="space-y-3 md:hidden">
-            {displayPengeluaran.map((row) => (
+            {displayPengeluaran.map((row, index) => (
               <div
                 key={row.id}
-                className="rounded-xl border border-rose-200/75 bg-gradient-to-b from-white/95 to-rose-50/30 p-3 shadow-sm dark:border-rose-900/35 dark:from-[#1a2144]/98 dark:to-[#281820]/95"
+                className={`rounded-xl border p-3 ${OWNER_INTERACTIVE_MOTION} ${isOwnerRole ? ownerListCardTheme(index) : "border-rose-200/75 bg-gradient-to-b from-white/95 to-rose-50/30 shadow-sm dark:border-rose-900/35 dark:from-[#1a2144]/98 dark:to-[#281820]/95"}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">
                     {row.kategori}
                   </p>
-                  <span className="inline-flex shrink-0 items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-rose-800 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-rose-300/90 bg-white/80 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-rose-800 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-200">
                     {row.status}
                   </span>
                 </div>
-                <dl className="mt-2.5 space-y-2 border-t border-rose-200/55 pt-2.5 text-xs dark:border-rose-900/30">
-                  <div className="flex justify-between gap-3">
-                    <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
-                      Lingkup P&amp;L
-                    </dt>
-                    <dd className="text-right font-medium text-[#6e5336] dark:text-[#bfa27f]">{row.lingkup}</dd>
-                  </div>
+                <dl className="mt-2.5 space-y-2 border-t border-black/5 pt-2.5 text-xs dark:border-white/10">
+                  {!isOwnerRole ? (
+                    <div className="flex justify-between gap-3">
+                      <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
+                        Lingkup P&amp;L
+                      </dt>
+                      <dd className="text-right font-medium text-[#6e5336] dark:text-[#bfa27f]">{row.lingkup}</dd>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between gap-3">
                     <dt className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724c] dark:text-[#cba97d]">
                       Tanggal
@@ -1858,7 +2043,7 @@ export default function DashboardPage() {
             {displayPengeluaran.length === 0 ? (
               <p className="rounded-xl border border-dashed border-rose-200/90 bg-rose-50/40 px-3 py-4 text-center text-xs leading-relaxed text-[#7d6042] dark:border-rose-900/45 dark:bg-rose-950/25 dark:text-[#eab4b4]">
                 {isOwnerRole
-                  ? `Tidak ada pengeluaran kos untuk P&L ${ownerPnlMonth} pada filter ini (pengeluaran manajemen tidak ditampilkan).`
+                  ? `Tidak ada pengeluaran untuk P&L ${ownerPnlMonth} pada filter ini.`
                   : "Belum ada pengeluaran atau tidak cocok filter."}
               </p>
             ) : null}
@@ -1868,24 +2053,30 @@ export default function DashboardPage() {
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
                   <th className="whitespace-nowrap px-3 py-3">Kategori</th>
-                  <th className="whitespace-nowrap px-3 py-3">Lingkup P&amp;L</th>
+                  {!isOwnerRole ? (
+                    <th className="whitespace-nowrap px-3 py-3">Lingkup P&amp;L</th>
+                  ) : null}
                   <th className="whitespace-nowrap px-3 py-3">Tanggal</th>
                   <th className="whitespace-nowrap px-3 py-3">Nominal</th>
                   <th className="whitespace-nowrap px-3 py-3">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {displayPengeluaran.map((row) => (
+                {displayPengeluaran.map((row, index) => (
                   <tr
                     key={row.id}
-                    className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
+                    className={`border-b border-[#e3e9ff]/80 transition-colors duration-150 last:border-none dark:border-[#3a467f]/80 ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
                   >
-                    <td className="max-w-[14rem] px-3 py-3">{row.kategori}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-[#6e5336] dark:text-[#bfa27f]">{row.lingkup}</td>
+                    <td className="max-w-[14rem] px-3 py-3 font-medium">{row.kategori}</td>
+                    {!isOwnerRole ? (
+                      <td className="whitespace-nowrap px-3 py-3 text-[#6e5336] dark:text-[#bfa27f]">{row.lingkup}</td>
+                    ) : null}
                     <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.tanggal}</td>
-                    <td className="whitespace-nowrap px-3 py-3 tabular-nums font-medium">{row.nominal}</td>
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums font-semibold text-rose-900 dark:text-rose-100">
+                      {row.nominal}
+                    </td>
                     <td className="px-3 py-3">
-                      <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-rose-800 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                      <span className="inline-flex items-center rounded-full border border-rose-300/90 bg-white/70 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-rose-800 dark:border-rose-700 dark:bg-rose-950/45 dark:text-rose-200">
                         {row.status}
                       </span>
                     </td>
@@ -1893,9 +2084,9 @@ export default function DashboardPage() {
                 ))}
                 {displayPengeluaran.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm leading-relaxed text-[#7d6042]" colSpan={5}>
+                    <td className="px-3 py-3 text-sm leading-relaxed text-[#7d6042]" colSpan={isOwnerRole ? 4 : 5}>
                       {isOwnerRole
-                        ? `Tidak ada pengeluaran kos untuk P&L ${ownerPnlMonth} pada filter ini (pengeluaran manajemen tidak ditampilkan).`
+                        ? `Tidak ada pengeluaran untuk P&L ${ownerPnlMonth} pada filter ini.`
                         : "Belum ada pengeluaran atau tidak cocok filter."}
                     </td>
                   </tr>
@@ -1903,18 +2094,8 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
-          <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-            {!isOwnerRole ? (
-              <span className="inline-flex min-h-[2.5rem] items-center justify-center rounded-full border border-rose-200 bg-rose-50/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100 sm:min-h-0 sm:tracking-[0.12em]">
-                Kos Rp {displayPengeluaranSplit.kos.toLocaleString("id-ID")} · Manajemen Rp{" "}
-                {displayPengeluaranSplit.manajemen.toLocaleString("id-ID")}
-              </span>
-            ) : (
-              <span className="inline-flex min-h-[2.5rem] items-center justify-center rounded-full border border-rose-200 bg-rose-50/90 px-3 py-1.5 text-center text-[10px] font-semibold uppercase leading-snug tracking-[0.1em] text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100 sm:min-h-0 sm:tracking-[0.12em]">
-                Pengeluaran kos Rp {displayPengeluaranSplit.kos.toLocaleString("id-ID")}
-              </span>
-            )}
-            <span className="inline-flex min-h-[2.5rem] w-full items-center justify-center rounded-full border border-rose-300 bg-rose-50 px-3 py-2 text-center text-[11px] font-bold uppercase leading-snug tracking-[0.1em] text-rose-900 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-100 sm:min-h-0 sm:w-auto sm:py-1 sm:text-xs sm:tracking-[0.14em]">
+          <div className="mt-3 flex justify-end">
+            <span className="inline-flex min-h-[2.5rem] w-full items-center justify-center rounded-full border border-rose-300 bg-gradient-to-r from-rose-50 to-orange-50/80 px-4 py-2 text-center text-[11px] font-bold uppercase leading-snug tracking-[0.12em] text-rose-900 shadow-sm dark:border-rose-700 dark:from-rose-950/40 dark:to-orange-950/25 dark:text-rose-100 sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-xs sm:tracking-[0.14em]">
               Total pengeluaran: Rp {totalPengeluaranNominal.toLocaleString("id-ID")}
             </span>
           </div>
@@ -1922,7 +2103,13 @@ export default function DashboardPage() {
         ) : null}
 
         {showOwnerFinanceDetail ? (
-        <article className="min-w-0 rounded-2xl border border-[#d6ddff] bg-white/90 p-4 dark:border-[#4f5b99] dark:bg-[#1a2144]/95 sm:rounded-[1.8rem] sm:p-5">
+        <article
+          className={`min-w-0 rounded-2xl border p-4 sm:rounded-[1.8rem] sm:p-5 ${
+            isOwnerRole
+              ? ownerSectionArticleTheme(3)
+              : "border-[#d6ddff] bg-white/90 dark:border-[#4f5b99] dark:bg-[#1a2144]/95"
+          }`}
+        >
           <SectionTitleWithIcon
             icon={BadgeDollarSign}
             title="Tabel Pemasukan"
@@ -1930,10 +2117,14 @@ export default function DashboardPage() {
             iconClassName={iconTone.success}
           />
           <div className="space-y-3 md:hidden">
-            {displayPemasukan.map((row) => (
+            {displayPemasukan.map((row, index) => (
               <div
                 key={row.id}
-                className="rounded-xl border border-emerald-200/80 bg-gradient-to-b from-white/95 to-emerald-50/35 p-3 shadow-sm dark:border-emerald-900/35 dark:from-[#1a2144]/98 dark:to-[#14261c]/95"
+                className={`rounded-xl border p-3 ${
+                  isOwnerRole
+                    ? `${OWNER_INTERACTIVE_MOTION} ${ownerListCardTheme(index)}`
+                    : "border-emerald-200/80 bg-gradient-to-b from-white/95 to-emerald-50/35 shadow-sm dark:border-emerald-900/35 dark:from-[#1a2144]/98 dark:to-[#14261c]/95"
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-[#2d2217] dark:text-[#f6e9d5]">
@@ -1964,7 +2155,7 @@ export default function DashboardPage() {
             {displayPemasukan.length === 0 ? (
               <p className="rounded-xl border border-dashed border-emerald-200/90 bg-emerald-50/40 px-3 py-4 text-center text-xs leading-relaxed text-[#7d6042] dark:border-emerald-900/45 dark:bg-emerald-950/25 dark:text-[#a8d4bc]">
                 {isOwnerRole
-                  ? `Tidak ada pemasukan kos (Sewa kamar) untuk P&L ${ownerPnlMonth} pada filter ini (pemasukan manajemen tidak ditampilkan).`
+                  ? `Tidak ada pemasukan kos (Sewa kamar) untuk P&L ${ownerPnlMonth} pada filter ini.`
                   : "Belum ada pemasukan atau tidak cocok filter."}
               </p>
             ) : null}
@@ -1980,10 +2171,10 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayPemasukan.map((row) => (
+                {displayPemasukan.map((row, index) => (
                   <tr
                     key={row.id}
-                    className="border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] dark:bg-transparent"
+                    className={`border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
                   >
                     <td className="max-w-[16rem] px-3 py-3">{row.sumber}</td>
                     <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.tanggal}</td>
@@ -1999,7 +2190,7 @@ export default function DashboardPage() {
                   <tr>
                     <td className="px-3 py-3 text-sm leading-relaxed text-[#7d6042]" colSpan={4}>
                       {isOwnerRole
-                        ? `Tidak ada pemasukan kos (Sewa kamar) untuk P&L ${ownerPnlMonth} pada filter ini (pemasukan manajemen tidak ditampilkan).`
+                        ? `Tidak ada pemasukan kos (Sewa kamar) untuk P&L ${ownerPnlMonth} pada filter ini.`
                         : "Belum ada pemasukan atau tidak cocok filter."}
                     </td>
                   </tr>

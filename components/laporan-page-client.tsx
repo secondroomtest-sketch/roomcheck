@@ -585,11 +585,7 @@ export default function LaporanPageClient({
         const prev = map.get(key) ?? { pemasukan: 0, pengeluaran: 0, saldo: 0, keterangan: "" };
         const pemasukan = prev.pemasukan + row.nominal;
         map.set(key, { ...prev, pemasukan, saldo: pemasukan - prev.pengeluaran, keterangan: `Pemasukan · ${key.slice(2)}` });
-      } else if (
-        row.kategori === "Pengeluaran" &&
-        normalizePengeluaranScope(row.pengeluaranScope) !== "manajemen" &&
-        !isForcedPemasukanManajemenFinancePos(row.pos)
-      ) {
+      } else if (row.kategori === "Pengeluaran" && normalizePengeluaranScope(row.pengeluaranScope) !== "manajemen") {
         const key = `k:${(row.pos ?? "").trim() || "Pengeluaran kos lain"}`;
         const prev = map.get(key) ?? { pemasukan: 0, pengeluaran: 0, saldo: 0, keterangan: "" };
         const pengeluaran = prev.pengeluaran + row.nominal;

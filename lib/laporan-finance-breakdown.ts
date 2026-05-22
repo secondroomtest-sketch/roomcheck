@@ -45,12 +45,21 @@ export function isPemasukanKosReportRow(row: Pick<ReportFinanceRow, "kategori" |
 }
 
 /**
- * Pengeluaran dengan POS ini di P&amp;L manajemen diperlakukan sebagai **masuk/manajemen** (sama seperti tab Finance —
- * IPL &amp; fee manajemen walau dicatat lewat jurnal pengeluaran).
+ * POS pengeluaran kos yang juga dihitung sebagai **pemasukan manajemen** (IPL, Manajemen Fee).
+ * Tetap masuk `pengeluaranKosTotal` sehingga mengurangi P&amp;L / revenue kos.
  */
 export function isForcedPemasukanManajemenFinancePos(pos: string | undefined | null): boolean {
   const p = String(pos ?? "").trim().toLowerCase();
   return p === "ipl" || p === "manajemen fee";
+}
+
+/** Pengeluaran yang mengurangi P&amp;L kos (termasuk IPL &amp; Manajemen Fee). */
+export function isPengeluaranKosReportRow(
+  row: Pick<ReportFinanceRow, "kategori" | "pos" | "pengeluaranScope">
+): boolean {
+  if (row.kategori !== "Pengeluaran") return false;
+  if (isForcedPemasukanManajemenFinancePos(row.pos)) return true;
+  return normalizePengeluaranScope(row.pengeluaranScope) !== "manajemen";
 }
 
 function expenseScopeForReportRow(f: ReportFinanceRow): PengeluaranScope {
@@ -58,8 +67,8 @@ function expenseScopeForReportRow(f: ReportFinanceRow): PengeluaranScope {
 }
 
 /**
- * Baris yang masuk kubah **P&amp;L manajemen** (pembebanan luar sewa kamar / pengeluaran scope manajemen).
- * Dipakai dashboard owner untuk menyembunyikan manajemen dari ringkasan &amp; tabel.
+ * Baris yang masuk kubah **P&amp;L manajemen saja** (bukan IPL/Manajemen Fee — itu tetap di kubah kos).
+ * Dipakai dashboard owner untuk menyembunyikan manajemen murni dari ringkasan kos.
  */
 export function isManajemenPlFinanceUiRow(row: {
   kategori: "Pemasukan" | "Pengeluaran";
@@ -67,7 +76,7 @@ export function isManajemenPlFinanceUiRow(row: {
   pengeluaranScope?: PengeluaranScope | null;
 }): boolean {
   if (row.kategori === "Pengeluaran") {
-    if (isForcedPemasukanManajemenFinancePos(row.pos)) return true;
+    if (isForcedPemasukanManajemenFinancePos(row.pos)) return false;
     return normalizePengeluaranScope(row.pengeluaranScope) === "manajemen";
   }
   return !isPemasukanKosReportRow(row);
@@ -105,6 +114,8 @@ export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): Lapora
     const n = Number(f.nominal) || 0;
     if (f.kategori === "Pengeluaran") {
       if (isForcedPemasukanManajemenFinancePos(f.pos)) {
+        pengeluaranKosTotal += n;
+        pengeluaranKosTransactionCount += 1;
         pemasukanManajemenTotal += n;
         pemasukanManajemenTransactionCount += 1;
         continue;

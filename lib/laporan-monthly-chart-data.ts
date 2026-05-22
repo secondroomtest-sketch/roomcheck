@@ -32,6 +32,7 @@ export function computeMonthlyChartData(filteredFinance: ReportFinanceRow[]): La
     const n = row.nominal;
     if (row.kategori === "Pengeluaran") {
       if (isForcedPemasukanManajemenFinancePos(row.pos)) {
+        existing.pengeluaranKos += n;
         existing.pemasukanManajemen += n;
       } else if (normalizePengeluaranScope(row.pengeluaranScope) === "manajemen") {
         existing.pengeluaranManajemen += n;

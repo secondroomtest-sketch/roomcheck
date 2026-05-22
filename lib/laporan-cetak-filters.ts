@@ -41,7 +41,7 @@ function pemasukanManajemenUntukDetail(r: ReportFinanceRow): boolean {
 
 function pengeluaranKosUntukDetail(r: ReportFinanceRow): boolean {
   if (r.kategori !== "Pengeluaran") return false;
-  if (isForcedPemasukanManajemenFinancePos(r.pos)) return false;
+  if (isForcedPemasukanManajemenFinancePos(r.pos)) return true;
   return normalizePengeluaranScope(r.pengeluaranScope) !== "manajemen";
 }
 

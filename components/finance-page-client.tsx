@@ -48,7 +48,10 @@ import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 import { buildLaporanExportPayloadV1 } from "@/lib/laporan-export-payload";
 import type { LaporanFokusCetak } from "@/lib/laporan-cetak-filters";
 import { financePageRowToReportRow } from "@/lib/laporan-finance-page-row-to-report";
-import { isForcedPemasukanManajemenFinancePos } from "@/lib/laporan-finance-breakdown";
+import {
+  isForcedPemasukanManajemenFinancePos,
+  isPengeluaranKosReportRow,
+} from "@/lib/laporan-finance-breakdown";
 import { computeMonthlyChartData } from "@/lib/laporan-monthly-chart-data";
 import { openLaporanCetakTabWithPayload } from "@/lib/laporan-open-cetak-tab";
 import { financeRowInYmdInclusiveRange, ymdRangeInvalidOrTooLong } from "@/lib/laporan-report-dates";
@@ -178,7 +181,7 @@ function isPengeluaranManajemenRow(row: FinanceRow): boolean {
 }
 
 function isPengeluaranKosRow(row: FinanceRow): boolean {
-  return row.kategori === "Pengeluaran" && !isPengeluaranManajemenRow(row);
+  return isPengeluaranKosReportRow(row);
 }
 
 /** Form Pengeluaran: lingkup memfilter POS (selaras kolom pengeluaran_scope di Master). */
@@ -2004,7 +2007,9 @@ export default function FinancePageClient({
                   const nextPos = event.target.value;
                   setForm((prev) => ({ ...prev, pos: nextPos }));
                   if (isForcedPemasukanManajemenFinancePos(nextPos) && form.kategori === "Pengeluaran") {
-                    setInfoMessage(`POS "${nextPos}" dihitung sebagai pemasukan manajemen di ringkasan P&L, namun tetap tampil di riwayat pengeluaran kos.`);
+                    setInfoMessage(
+                      `POS "${nextPos}": dicatat sebagai pengeluaran kos (mengurangi P&L kos) dan sekaligus pemasukan manajemen di ringkasan P&L.`
+                    );
                   }
                 }}
                 disabled={effectivePosOptions.length === 0}

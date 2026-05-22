@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import Image from "next/image";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { credentialToSupabaseLoginEmail } from "@/lib/internal-auth-email";
+import { supabaseErrorMessageIndonesia } from "@/lib/supabase-connectivity";
 import { ChevronDown, ChevronUp, Eye, EyeOff, MessageCircle } from "lucide-react";
 
 /** 081338387417 → format wa.me (tanpa +) */
@@ -47,7 +48,7 @@ export default function LoginPage() {
       });
       error = out.error;
     } catch (e) {
-      error = e instanceof Error ? e : { message: String(e) };
+      error = { message: supabaseErrorMessageIndonesia(e, "Login gagal.") };
     }
 
     if (error) {

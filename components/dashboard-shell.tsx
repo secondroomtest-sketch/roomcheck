@@ -23,6 +23,8 @@ import { readDemoProfileSession, writeDemoProfileSession } from "@/lib/demo-auth
 import { normalizeUserProfileRole } from "@/lib/user-profile-role";
 import { SupabaseSessionHydratedProvider, useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { emitCloudDataResync } from "@/lib/cloud-resync";
+import { getSupabaseUserSafe, refreshSupabaseSessionSafe } from "@/lib/supabase-auth-api";
+import { checkSupabaseReachable } from "@/lib/supabase-connectivity";
 
 type ThemeMode = "light" | "dark";
 
@@ -86,6 +88,19 @@ function DashboardShellInner({
   }, []);
 
   useEffect(() => {
+    if (localDemoMode) return;
+    let cancelled = false;
+    void checkSupabaseReachable().then((result) => {
+      if (!cancelled && !result.ok) {
+        toast(result.message, "error", "top");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [localDemoMode, toast]);
+
+  useEffect(() => {
     const loadProfile = async () => {
       if (!sessionHydrated) return;
       if (localDemoMode) {
@@ -99,19 +114,23 @@ function DashboardShellInner({
         }
         return;
       }
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getSupabaseUserSafe();
 
       if (!user) {
         return;
       }
 
-      const { data } = await supabase
-        .from("user_profiles")
-        .select("full_name, role")
-        .eq("id", user.id)
-        .maybeSingle();
+      let data: Record<string, unknown> | null = null;
+      try {
+        const profileRes = await supabase
+          .from("user_profiles")
+          .select("full_name, role")
+          .eq("id", user.id)
+          .maybeSingle();
+        data = profileRes.data as Record<string, unknown> | null;
+      } catch {
+        return;
+      }
 
       const record = data as Record<string, unknown> | null;
       const fullName = String(record?.full_name ?? "").trim();
@@ -398,11 +417,7 @@ function DashboardShellInner({
                     void (async () => {
                       setHardRefreshLoading(true);
                       try {
-                        try {
-                          await supabase.auth.refreshSession();
-                        } catch {
-                          /* biarkan pengguna tetap coba kirim event resync */
-                        }
+                        await refreshSupabaseSessionSafe();
                         emitCloudDataResync();
                         await new Promise((resolve) => {
                           window.setTimeout(resolve, 700);

@@ -1,9 +1,13 @@
+import { processLock } from "@supabase/auth-js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let cached: SupabaseClient | null | undefined;
 
 /**
  * Satu instance untuk seluruh app. Lazy: tidak ada `createClient` saat parse modul.
+ *
+ * Auth memakai processLock (antrian dalam tab) — menghindari error Web Locks
+ * "another request stole it" saat banyak getSession/getUser/refreshSession paralel.
  */
 export function getSharedSupabaseClient(): SupabaseClient | null {
   if (cached !== undefined) {
@@ -15,7 +19,11 @@ export function getSharedSupabaseClient(): SupabaseClient | null {
     cached = null;
     return null;
   }
-  cached = createClient(url, key);
+  cached = createClient(url, key, {
+    auth: {
+      lock: processLock,
+    },
+  });
   return cached;
 }
 
