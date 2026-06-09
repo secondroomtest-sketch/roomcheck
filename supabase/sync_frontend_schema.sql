@@ -182,7 +182,7 @@ create table if not exists public.penghuni (
   tgl_check_out date,
   harga_bulanan numeric not null default 0,
   no_wa text,
-  status text not null default 'Booking' check (status in ('Booking', 'Stay', 'Survey')),
+  status text not null default 'Booking' check (status in ('Booking', 'Stay', 'Survey', 'History')),
   keterangan text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -214,6 +214,8 @@ set
   sewa_cycle_start = coalesce(sewa_cycle_start, tgl_check_in),
   sewa_cycle_end = coalesce(sewa_cycle_end, tgl_check_out)
 where coalesce(status, 'Booking') = 'Stay';
+alter table public.penghuni drop constraint if exists penghuni_status_check;
+alter table public.penghuni add constraint penghuni_status_check check (status in ('Booking', 'Stay', 'Survey', 'History'));
 create index if not exists idx_penghuni_status on public.penghuni(status);
 create index if not exists idx_penghuni_created_at on public.penghuni(created_at desc);
 

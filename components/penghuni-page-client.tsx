@@ -41,13 +41,36 @@ import {
   escapeIlikeExact,
   financeNotaTakenMessage,
   findFinanceRowWithDuplicateNota,
+  findLastUsedSrNota,
+  formatSrNotaFromDigits,
+  isValidSrNotaDigits,
   normalizeNotaKey,
+  sanitizeSrNotaDigits,
+  srNotaDigitsInvalidMessage,
+  SR_NOTA_MAX_DIGITS,
 } from "@/lib/finance-nota-validation";
 import { buildSewaSplitCalendarMonthStarts, splitNominalRupiahEqualParts } from "@/lib/finance-sewa-split";
 import type { KamarRow } from "@/components/kamar-page-client";
 import type { FinanceRow } from "@/components/finance-page-client";
 
-type PenghuniStatus = "Booking" | "Stay";
+type PenghuniStatus = "Booking" | "Stay" | "History";
+
+function mapPenghuniStatusFromDb(raw: unknown): PenghuniStatus {
+  const s = String(raw ?? "Booking").trim().toLowerCase();
+  if (s === "stay") return "Stay";
+  if (s === "history") return "History";
+  return "Booking";
+}
+
+function splitPenghuniByStatus(rows: PenghuniRow[]): { active: PenghuniRow[]; history: PenghuniRow[] } {
+  const active: PenghuniRow[] = [];
+  const history: PenghuniRow[] = [];
+  for (const r of rows) {
+    if (r.status === "History") history.push(r);
+    else active.push(r);
+  }
+  return { active, history };
+}
 
 export type PenghuniRow = {
   id: string;
@@ -278,7 +301,9 @@ export default function PenghuniPageClient({
     ...initialForm,
     noKamar: "",
   }));
-  const [data, setData] = useState<PenghuniRow[]>(initialData);
+  const initialPenghuniSplit = useMemo(() => splitPenghuniByStatus(initialData), [initialData]);
+  const [data, setData] = useState<PenghuniRow[]>(() => initialPenghuniSplit.active);
+  const [historyData, setHistoryData] = useState<PenghuniRow[]>(() => initialPenghuniSplit.history);
   const [cloudKamarRows, setCloudKamarRows] = useState<KamarRow[]>(initialKamarRows);
   const [cloudLokasiOptions, setCloudLokasiOptions] = useState<string[]>([]);
   const [cloudBlokMasterRows, setCloudBlokMasterRows] = useState<Array<{ lokasiId: string; namaBlok: string }>>([]);
@@ -301,6 +326,8 @@ export default function PenghuniPageClient({
   const [depositPaymentNominal, setDepositPaymentNominal] = useState("");
   /** Hanya angka setelah prefiks tetap SR (no. nota deposit = SR + angka). */
   const [depositPaymentNotaDigits, setDepositPaymentNotaDigits] = useState("");
+  /** Nota SR dengan nilai numerik tertinggi di tabel finance (untuk label di profil/panel payment). */
+  const [lastUsedSrNota, setLastUsedSrNota] = useState<string | null>(null);
   /** Duplikat no nota vs tabel finance (Supabase), untuk panel payment penghuni. */
   const [remotePaymentNotaConflictMessage, setRemotePaymentNotaConflictMessage] = useState("");
   const [showSurveyForm, setShowSurveyForm] = useState(false);
@@ -479,15 +506,50 @@ export default function PenghuniPageClient({
     return readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
   }, [localDemoMode, sandboxReady, sandboxRev]);
 
-  const sewaNotaFull = useMemo(() => {
-    const d = sewaPaymentNotaDigits.replace(/\D/g, "");
-    return d ? `SR${d}` : "";
-  }, [sewaPaymentNotaDigits]);
+  const sewaNotaFull = useMemo(
+    () => formatSrNotaFromDigits(sewaPaymentNotaDigits),
+    [sewaPaymentNotaDigits]
+  );
 
-  const depositNotaFull = useMemo(() => {
-    const d = depositPaymentNotaDigits.replace(/\D/g, "");
-    return d ? `SR${d}` : "";
-  }, [depositPaymentNotaDigits]);
+  const depositNotaFull = useMemo(
+    () => formatSrNotaFromDigits(depositPaymentNotaDigits),
+    [depositPaymentNotaDigits]
+  );
+
+  useEffect(() => {
+    const shouldLoad = penghuniProfileRow || showSewaPaymentPanel || showDepositPaymentPanel;
+    if (!shouldLoad) {
+      setLastUsedSrNota(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      if (localDemoMode) {
+        const fin = readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
+        if (!cancelled) setLastUsedSrNota(findLastUsedSrNota(fin));
+        return;
+      }
+      const { data, error } = await supabase.from("finance").select("no_nota");
+      if (cancelled) return;
+      if (error) {
+        setLastUsedSrNota(null);
+        return;
+      }
+      setLastUsedSrNota(
+        findLastUsedSrNota((data ?? []).map((r) => ({ no_nota: r.no_nota })))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    penghuniProfileRow,
+    showSewaPaymentPanel,
+    showDepositPaymentPanel,
+    localDemoMode,
+    sandboxRev,
+    cloudSyncTick,
+  ]);
 
   const activePaymentNotaTrimmed = useMemo(() => {
     if (showSewaPaymentPanel) return sewaNotaFull;
@@ -616,6 +678,21 @@ export default function PenghuniPageClient({
     return copy;
   }, [filteredPenghuniBySearch]);
 
+  const filteredHistoryData = useMemo(() => {
+    return historyData.filter((row) => {
+      const lokasiMatch =
+        selectedLokasiFilter === "Semua Lokasi" || row.lokasiKos === selectedLokasiFilter;
+      const unitMatch = selectedUnitFilter === "Semua Blok/Unit" || row.unitBlok === selectedUnitFilter;
+      return lokasiMatch && unitMatch;
+    });
+  }, [historyData, selectedLokasiFilter, selectedUnitFilter]);
+
+  const sortedHistoryByCheckOut = useMemo(() => {
+    const copy = [...filteredHistoryData];
+    copy.sort((a, b) => sortDateKey(b.tglCheckOut) - sortDateKey(a.tglCheckOut));
+    return copy;
+  }, [filteredHistoryData]);
+
   const filteredSurveyRows = useMemo(() => {
     return surveyCalon.filter((row) => {
       const lokasiMatch =
@@ -727,13 +804,18 @@ export default function PenghuniPageClient({
       writeSandboxJson(SB_KEY.penghuni, normalizedPen);
     }
     nextPen = normalizedPen;
-    setData(nextPen.length ? nextPen : initialData);
+    const split = splitPenghuniByStatus(nextPen.length ? nextPen : initialData);
+    setData(split.active);
+    setHistoryData(split.history);
     setSurveyCalon(nextSurvey);
   }, [localDemoMode, initialData, sandboxRev, sandboxReady]);
 
+  const persistPenghuniSandbox = (active: PenghuniRow[], history: PenghuniRow[]) => {
+    writeSandboxJson(SB_KEY.penghuni, [...active, ...history]);
+  };
+
   const mapDbRowToUi = (row: Record<string, unknown>): PenghuniRow => {
-    const statusRaw = String(row.status ?? "Booking");
-    const status: PenghuniStatus = statusRaw === "Stay" ? "Stay" : "Booking";
+    const status = mapPenghuniStatusFromDb(row.status);
 
     const mapped: PenghuniRow = {
       id: String(row.id ?? ""),
@@ -783,9 +865,14 @@ export default function PenghuniPageClient({
         );
       });
       if (drift) {
-        writeSandboxJson(SB_KEY.penghuni, normalized);
+        persistPenghuniSandbox(
+          normalized.filter((p) => p.status !== "History"),
+          normalized.filter((p) => p.status === "History")
+        );
       }
-      setData(normalized.filter((p) => p.status === "Booking" || p.status === "Stay"));
+      const split = splitPenghuniByStatus(normalized);
+      setData(split.active);
+      setHistoryData(split.history);
       setSurveyCalon(readSandboxJson<SurveyCalonRow[]>(SB_KEY.surveyCalon, []));
       setErrorMessage("");
       setIsLoading(false);
@@ -830,7 +917,9 @@ export default function PenghuniPageClient({
     const surveyRows = rows.filter((row) => String(row.status ?? "").toLowerCase() === "survey");
     const penghuniRows = rows.filter((row) => String(row.status ?? "").toLowerCase() !== "survey");
     setSurveyCalon(surveyRows.map((row) => mapDbRowToSurvey(row)));
-    setData(penghuniRows.map((row) => mapDbRowToUi(row)));
+    const split = splitPenghuniByStatus(penghuniRows.map((row) => mapDbRowToUi(row)));
+    setData(split.active);
+    setHistoryData(split.history);
 
     const [{ data: kamarData, error: kamarError }, { data: lokasiData }, { data: blokData }] =
       await Promise.all([
@@ -917,7 +1006,7 @@ export default function PenghuniPageClient({
   useEffect(() => {
     setPenghuniProfileRow((prev) => {
       if (!prev) return prev;
-      const fresh = data.find((p) => p.id === prev.id);
+      const fresh = data.find((p) => p.id === prev.id) ?? historyData.find((p) => p.id === prev.id);
       if (!fresh) return prev;
       if (
         fresh.sewaKamarPaid === prev.sewaKamarPaid &&
@@ -929,7 +1018,7 @@ export default function PenghuniPageClient({
       }
       return fresh;
     });
-  }, [data]);
+  }, [data, historyData]);
 
   const handleRefreshPenghuni = async () => {
     const ok = await loadPenghuni();
@@ -1112,7 +1201,7 @@ export default function PenghuniPageClient({
         ? data.map((row) => (row.id === editingId ? { ...base, id: editingId } : row))
         : [base, ...data];
       setData(next);
-      writeSandboxJson(SB_KEY.penghuni, next);
+      persistPenghuniSandbox(next, historyData);
       const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
       writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, next));
       toast(editingId ? "Data penghuni berhasil diperbarui." : "Data penghuni berhasil disimpan.", "success");
@@ -1193,11 +1282,13 @@ export default function PenghuniPageClient({
     setErrorMessage("");
 
     if (localDemoMode) {
-      const next = data.filter((row) => row.id !== id);
-      setData(next);
-      writeSandboxJson(SB_KEY.penghuni, next);
+      const nextActive = data.filter((row) => row.id !== id);
+      const nextHistory = historyData.filter((row) => row.id !== id);
+      setData(nextActive);
+      setHistoryData(nextHistory);
+      persistPenghuniSandbox(nextActive, nextHistory);
       const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
-      writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, next));
+      writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, nextActive));
       if (editingId === id) resetForm();
       return true;
     }
@@ -1485,7 +1576,7 @@ export default function PenghuniPageClient({
           : p
       );
       setData(updated);
-      writeSandboxJson(SB_KEY.penghuni, updated);
+      persistPenghuniSandbox(updated, historyData);
       setPenghuniProfileRow((prev) =>
         prev && prev.id === row.id
           ? {
@@ -1500,6 +1591,8 @@ export default function PenghuniPageClient({
             }
           : prev
       );
+      const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
+      writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, updated));
       setShowExtendStayPanel(false);
       setIsSubmittingExtendStay(false);
       toast("Extend stay berhasil disimpan. Payment sewa kamar aktif kembali.", "success");
@@ -1543,6 +1636,64 @@ export default function PenghuniPageClient({
     setShowExtendStayPanel(false);
     setIsSubmittingExtendStay(false);
     toast("Extend stay berhasil disimpan. Payment sewa kamar aktif kembali.", "success");
+  };
+
+  const handleCheckoutPenghuni = async () => {
+    const row = penghuniProfileRow;
+    if (!row || row.status !== "Stay") return;
+    const checkoutDate = new Date().toISOString().slice(0, 10);
+    const ok = await confirm({
+      title: "Konfirmasi check out?",
+      message: `${row.namaLengkap} akan check out dari kamar ${row.unitBlok} / ${row.noKamar}. Kamar menjadi Available dan data penghuni dipindah ke daftar history.`,
+      confirmLabel: "Ya, check out",
+      cancelLabel: "Batal",
+    });
+    if (!ok) return;
+
+    const historyRow: PenghuniRow = {
+      ...row,
+      status: "History",
+      tglCheckOut: checkoutDate,
+      sewaCycleEnd: checkoutDate,
+    };
+
+    if (localDemoMode) {
+      const nextActive = data.filter((p) => p.id !== row.id);
+      const nextHistory = [historyRow, ...historyData.filter((h) => h.id !== row.id)];
+      setData(nextActive);
+      setHistoryData(nextHistory);
+      persistPenghuniSandbox(nextActive, nextHistory);
+      const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
+      writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, nextActive));
+      setPenghuniProfileRow(null);
+      setShowSewaPaymentPanel(false);
+      setShowExtendStayPanel(false);
+      setShowDepositPaymentPanel(false);
+      toast(`${row.namaLengkap} berhasil check out. Kamar tersedia kembali.`, "success");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("penghuni")
+      .update({
+        status: "History",
+        tgl_check_out: checkoutDate,
+        sewa_cycle_end: checkoutDate,
+      })
+      .eq("id", row.id);
+    if (!isMountedRef.current) return;
+    if (error) {
+      toast(error.message, "error");
+      return;
+    }
+    await loadPenghuni();
+    await reconcileCloudKamarWithPenghuni();
+    if (!isMountedRef.current) return;
+    setPenghuniProfileRow(null);
+    setShowSewaPaymentPanel(false);
+    setShowExtendStayPanel(false);
+    setShowDepositPaymentPanel(false);
+    toast(`${row.namaLengkap} berhasil check out. Kamar tersedia kembali.`, "success");
   };
 
   const handleSendSurveyWa = (row: SurveyCalonRow) => {
@@ -1626,10 +1777,15 @@ export default function PenghuniPageClient({
   const handleSewaPaymentSekarang = async () => {
     const row = penghuniProfileRow;
     if (!row) return;
-    const digits = sewaPaymentNotaDigits.replace(/\D/g, "");
-    const noNota = digits ? `SR${digits}` : "";
-    if (!digits) {
-      toast("Isi nomor nota setelah SR (hanya angka).", "error");
+    const digits = sanitizeSrNotaDigits(sewaPaymentNotaDigits);
+    const noNota = formatSrNotaFromDigits(digits);
+    if (!isValidSrNotaDigits(digits)) {
+      toast(
+        digits.length > SR_NOTA_MAX_DIGITS
+          ? srNotaDigitsInvalidMessage()
+          : "Isi nomor nota setelah SR (hanya angka).",
+        "error"
+      );
       return;
     }
     const notaTakenErr = await verifyFinanceNotaFreeForPayment(noNota);
@@ -1720,7 +1876,7 @@ export default function PenghuniPageClient({
           : p
       );
       setData(updatedPen);
-      writeSandboxJson(SB_KEY.penghuni, updatedPen);
+      persistPenghuniSandbox(updatedPen, historyData);
       setPenghuniProfileRow({
         ...row,
         sewaKamarPaid: true,
@@ -1823,10 +1979,15 @@ export default function PenghuniPageClient({
   const handleDepositPaymentSekarang = async () => {
     const row = penghuniProfileRow;
     if (!row) return;
-    const digits = depositPaymentNotaDigits.replace(/\D/g, "");
-    const noNota = digits ? `SR${digits}` : "";
-    if (!digits) {
-      toast("Isi nomor nota setelah SR (hanya angka).", "error");
+    const digits = sanitizeSrNotaDigits(depositPaymentNotaDigits);
+    const noNota = formatSrNotaFromDigits(digits);
+    if (!isValidSrNotaDigits(digits)) {
+      toast(
+        digits.length > SR_NOTA_MAX_DIGITS
+          ? srNotaDigitsInvalidMessage()
+          : "Isi nomor nota setelah SR (hanya angka).",
+        "error"
+      );
       return;
     }
     const notaTakenErr = await verifyFinanceNotaFreeForPayment(noNota);
@@ -1869,7 +2030,7 @@ export default function PenghuniPageClient({
         p.id === row.id ? { ...p, depositKamarPaid: true, depositKamarNota: noNota } : p
       );
       setData(updatedPen);
-      writeSandboxJson(SB_KEY.penghuni, updatedPen);
+      persistPenghuniSandbox(updatedPen, historyData);
       setPenghuniProfileRow({ ...row, depositKamarPaid: true, depositKamarNota: noNota });
       const fin = readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
       const finRow: FinanceRow = {
@@ -2202,6 +2363,49 @@ export default function PenghuniPageClient({
               {errorMessage || infoMessage}
             </p>
           )}
+
+          <div className="mt-6 border-t border-[#e5d8c4] pt-5 dark:border-[#3d2f22]">
+            <p className="text-xs uppercase tracking-[0.22em] text-[#8b6d48] dark:text-[#b79a78]">History penghuni</p>
+            <p className="mt-1 text-xs text-[#7f6344] dark:text-[#b79a78]">
+              Penghuni yang sudah check out. Double klik baris untuk melihat profil arsip.
+            </p>
+            <div className="mt-3 max-h-[min(280px,35vh)] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-700">
+              <table className="min-w-full text-left text-sm">
+                <thead className="sticky top-0 bg-zinc-100 text-xs uppercase tracking-[0.12em] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  <tr>
+                    <th className="px-3 py-2">Nama</th>
+                    <th className="px-3 py-2">Lokasi</th>
+                    <th className="px-3 py-2">Unit / Kamar</th>
+                    <th className="px-3 py-2">Check-out</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {sortedHistoryByCheckOut.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                        Belum ada penghuni di history.
+                      </td>
+                    </tr>
+                  ) : (
+                    sortedHistoryByCheckOut.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="cursor-pointer transition hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+                        onDoubleClick={() => setPenghuniProfileRow(row)}
+                      >
+                        <td className="px-3 py-2">{row.namaLengkap}</td>
+                        <td className="px-3 py-2">{row.lokasiKos}</td>
+                        <td className="px-3 py-2">
+                          {row.unitBlok} / {row.noKamar}
+                        </td>
+                        <td className="px-3 py-2">{row.tglCheckOut || "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
       </article>
 
       <article className="rounded-[2rem] border border-violet-200/80 bg-gradient-to-b from-[#f3f1ff]/95 to-white/95 p-6 shadow-[0_20px_50px_-35px_rgba(63,79,157,0.35)] dark:border-[#424a80] dark:from-[#1f2344] dark:to-[#1b1f3d]/95">
@@ -2387,14 +2591,25 @@ export default function PenghuniPageClient({
                 <dd className="mt-1 text-[#3f2f1f] dark:text-[#e8dcc8]">
                   {penghuniProfileRow.status === "Booking" ? "—" : penghuniProfileRow.tglCheckOut || "—"}
                 </dd>
-                {penghuniProfileRow.status === "Stay" && isPenghuniSewaOverdue(penghuniProfileRow) ? (
-                  <button
-                    type="button"
-                    onClick={openExtendStayPanel}
-                    className="mt-2 inline-flex items-center gap-2 rounded-lg border border-red-300 bg-red-100 px-2.5 py-1.5 text-[11px] font-semibold text-red-800 transition hover:bg-red-200 dark:border-red-700 dark:bg-red-900/40 dark:text-red-200 dark:hover:bg-red-900/60"
-                  >
-                    Extend stay
-                  </button>
+                {penghuniProfileRow.status === "Stay" ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {isPenghuniSewaOverdue(penghuniProfileRow) ? (
+                      <button
+                        type="button"
+                        onClick={openExtendStayPanel}
+                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-100 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+                      >
+                        Extend stay
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void handleCheckoutPenghuni()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-400 bg-red-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-red-700 dark:border-red-600 dark:bg-red-700 dark:hover:bg-red-800"
+                    >
+                      Check out
+                    </button>
+                  </div>
                 ) : null}
               </div>
               <div className="pt-1">
@@ -2505,6 +2720,22 @@ export default function PenghuniPageClient({
             </div>
 
             <div className="mt-auto flex flex-col gap-3 pt-8">
+              {penghuniProfileRow.status !== "History" ? (
+                <p className="rounded-xl border border-[#e5d8c4] bg-[#f3ebe0]/80 px-3 py-2 text-xs text-[#6e5336] dark:border-[#4f3b2a] dark:bg-[#2a2018]/80 dark:text-[#bfa27f]">
+                  Nota terakhir dipakai:{" "}
+                  <span className="font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
+                    {lastUsedSrNota ?? "Belum ada"}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] text-[#8b6d48] dark:text-[#9d7e55]">
+                    Format SR + maks. {SR_NOTA_MAX_DIGITS} digit angka.
+                  </span>
+                </p>
+              ) : null}
+              {penghuniProfileRow.status === "History" ? (
+                <p className="rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-200">
+                  Penghuni ini sudah check out dan hanya tampil di daftar history.
+                </p>
+              ) : null}
               {penghuniProfileRow.status === "Booking" ? (
                 <>
                   <button
@@ -2533,7 +2764,7 @@ export default function PenghuniPageClient({
                     Payment sewa kamar
                   </button>
                 </>
-              ) : (
+              ) : penghuniProfileRow.status === "Stay" ? (
                 <>
                   <button
                     type="button"
@@ -2557,7 +2788,7 @@ export default function PenghuniPageClient({
                     Payment deposit kamar
                   </button>
                 </>
-              )}
+              ) : null}
             </div>
 
             <button
@@ -2639,7 +2870,13 @@ export default function PenghuniPageClient({
                 No. nota <span className="text-red-600 dark:text-red-400">*</span>
               </span>
               <p className="mt-0.5 text-xs text-[#6e5336] dark:text-[#bfa27f]">
-                Format: <span className="font-semibold">SR</span> + nomor (isi hanya angka di kolom kanan).
+                Format: <span className="font-semibold">SR</span> + maks. {SR_NOTA_MAX_DIGITS} digit angka.
+                {" "}
+                Nota terakhir dipakai:{" "}
+                <span className="font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
+                  {lastUsedSrNota ?? "Belum ada"}
+                </span>
+                .
               </p>
               <div
                 className={`mt-1 flex w-full items-center overflow-hidden rounded-xl border bg-white text-[#2c2218] outline-none dark:bg-[#1f1710] dark:text-[#f5e8d4] ${
@@ -2659,15 +2896,16 @@ export default function PenghuniPageClient({
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
+                  maxLength={SR_NOTA_MAX_DIGITS}
                   value={sewaPaymentNotaDigits}
-                  onChange={(e) => setSewaPaymentNotaDigits(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) => setSewaPaymentNotaDigits(sanitizeSrNotaDigits(e.target.value))}
                   aria-invalid={Boolean(paymentNotaConflictMessage)}
                   aria-label="Nomor nota setelah SR"
                   aria-describedby={
                     paymentNotaConflictMessage ? "penghuni-sewa-payment-nota-alert" : undefined
                   }
                   className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-[#2c2218] outline-none placeholder:text-[#9d7e55]/70 dark:text-[#f5e8d4]"
-                  placeholder="contoh: 24001"
+                  placeholder="contoh: 0001"
                 />
               </div>
               {paymentNotaConflictMessage ? (
@@ -2709,7 +2947,7 @@ export default function PenghuniPageClient({
           <div className="border-t border-[#eadcc9] p-5 dark:border-[#3d2f22]">
             <button
               type="button"
-              disabled={Boolean(paymentNotaConflictMessage) || !sewaPaymentNotaDigits.replace(/\D/g, "").length}
+              disabled={Boolean(paymentNotaConflictMessage) || !isValidSrNotaDigits(sewaPaymentNotaDigits)}
               onClick={() => void handleSewaPaymentSekarang()}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -2877,7 +3115,13 @@ export default function PenghuniPageClient({
                 No. nota <span className="text-red-600 dark:text-red-400">*</span>
               </span>
               <p className="mt-0.5 text-xs text-[#6e5336] dark:text-[#bfa27f]">
-                Format: <span className="font-semibold">SR</span> + nomor (isi hanya angka di kolom kanan).
+                Format: <span className="font-semibold">SR</span> + maks. {SR_NOTA_MAX_DIGITS} digit angka.
+                {" "}
+                Nota terakhir dipakai:{" "}
+                <span className="font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
+                  {lastUsedSrNota ?? "Belum ada"}
+                </span>
+                .
               </p>
               <div
                 className={`mt-1 flex w-full items-center overflow-hidden rounded-xl border bg-white text-[#2c2218] outline-none dark:bg-[#1f1710] dark:text-[#f5e8d4] ${
@@ -2897,15 +3141,16 @@ export default function PenghuniPageClient({
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
+                  maxLength={SR_NOTA_MAX_DIGITS}
                   value={depositPaymentNotaDigits}
-                  onChange={(e) => setDepositPaymentNotaDigits(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) => setDepositPaymentNotaDigits(sanitizeSrNotaDigits(e.target.value))}
                   aria-invalid={Boolean(paymentNotaConflictMessage)}
                   aria-label="Nomor nota setelah SR"
                   aria-describedby={
                     paymentNotaConflictMessage ? "penghuni-deposit-payment-nota-alert" : undefined
                   }
                   className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-[#2c2218] outline-none placeholder:text-[#9d7e55]/70 dark:text-[#f5e8d4]"
-                  placeholder="contoh: 24001"
+                  placeholder="contoh: 0001"
                 />
               </div>
               {paymentNotaConflictMessage ? (
@@ -2948,7 +3193,7 @@ export default function PenghuniPageClient({
           <div className="border-t border-[#eadcc9] p-5 dark:border-[#3d2f22]">
             <button
               type="button"
-              disabled={Boolean(paymentNotaConflictMessage) || !depositPaymentNotaDigits.replace(/\D/g, "").length}
+              disabled={Boolean(paymentNotaConflictMessage) || !isValidSrNotaDigits(depositPaymentNotaDigits)}
               onClick={() => void handleDepositPaymentSekarang()}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >

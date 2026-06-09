@@ -38,7 +38,12 @@ import {
   escapeIlikeExact,
   financeNotaTakenMessage,
   findFinanceRowWithDuplicateNota,
+  formatSrNotaFromDigits,
+  isValidSrNotaDigits,
   normalizeNotaKey,
+  sanitizeSrNotaDigits,
+  srNotaDigitsInvalidMessage,
+  SR_NOTA_MAX_DIGITS,
 } from "@/lib/finance-nota-validation";
 import { readDemoProfileSession } from "@/lib/demo-auth";
 import type { ReportKamarRow } from "@/lib/laporan-export-types";
@@ -55,6 +60,7 @@ import {
 import { computeMonthlyChartData } from "@/lib/laporan-monthly-chart-data";
 import { openLaporanCetakTabWithPayload } from "@/lib/laporan-open-cetak-tab";
 import { financeRowInYmdInclusiveRange, ymdRangeInvalidOrTooLong } from "@/lib/laporan-report-dates";
+import { openFinanceInvoiceTab } from "@/lib/finance-open-invoice-tab";
 import { fetchKamarPenghuniSurveyForLaporanExport } from "@/lib/laporan-side-export-load";
 import {
   pageFieldWarmClass,
@@ -219,6 +225,7 @@ function FinanceRiwayatTableBlock({
   onCancelPemasukanPayment,
   canCancelPengeluaranPayment,
   onCancelPengeluaranPayment,
+  onRowDoubleClick,
   footerSumTone = "income",
 }: {
   title: string;
@@ -231,10 +238,17 @@ function FinanceRiwayatTableBlock({
   onCancelPemasukanPayment?: (row: FinanceRow) => void;
   canCancelPengeluaranPayment?: boolean;
   onCancelPengeluaranPayment?: (row: FinanceRow) => void;
+  /** Double klik baris → buka invoice (print / PDF). */
+  onRowDoubleClick?: (row: FinanceRow) => void;
   /** Warna nominal total footer: pemasukan (hijau) vs pengeluaran (merah muda). */
   footerSumTone?: "income" | "expense";
 }) {
   const sumNominal = sumNominalRows(rows);
+
+  const handleRowOpenInvoice = (row: FinanceRow, e: MouseEvent<HTMLElement>) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    onRowDoubleClick?.(row);
+  };
 
   const bindRowHover = (row: FinanceRow) => ({
     onMouseEnter: (e: MouseEvent<HTMLTableRowElement>) =>
@@ -282,6 +296,21 @@ function FinanceRiwayatTableBlock({
       </span>
     );
 
+  const actionCellForRow = (row: FinanceRow) => (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {onRowDoubleClick ? (
+        <ActionButtonWithIcon
+          icon={ReceiptText}
+          label="Invoice"
+          onClick={() => onRowDoubleClick(row)}
+          className="rounded-full bg-violet-700 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-white shadow-sm hover:bg-violet-800"
+          iconClassName="text-white"
+        />
+      ) : null}
+      {statusCellForRow(row)}
+    </div>
+  );
+
   return (
     <section className="overflow-hidden rounded-xl border border-[#e5d9c9] bg-[#fffdfb] dark:border-[#403228] dark:bg-[#231b14]/45">
       <div className="p-3.5 sm:p-4">
@@ -305,7 +334,10 @@ function FinanceRiwayatTableBlock({
             {rows.map((row) => (
               <article
                 key={row.id}
-                className="rounded-2xl border border-[#eadcc9] bg-[#fffdf9] p-4 shadow-sm dark:border-[#3d2f22] dark:bg-[#2b2016]"
+                className={`rounded-2xl border border-[#eadcc9] bg-[#fffdf9] p-4 shadow-sm dark:border-[#3d2f22] dark:bg-[#2b2016] ${
+                  onRowDoubleClick ? "cursor-pointer" : ""
+                }`}
+                onClick={onRowDoubleClick ? (e) => handleRowOpenInvoice(row, e) : undefined}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -348,7 +380,7 @@ function FinanceRiwayatTableBlock({
                     {(row.keterangan ?? "").trim()}
                   </p>
                 ) : null}
-                <div className="mt-3 flex flex-wrap justify-end">{statusCellForRow(row)}</div>
+                <div className="mt-3 flex flex-wrap justify-end">{actionCellForRow(row)}</div>
               </article>
             ))}
             <div className="rounded-2xl border-2 border-[#d4bc9a] bg-[#f0e4d4] p-4 dark:border-[#5c452d] dark:bg-[#2a1f16]">
@@ -402,8 +434,11 @@ function FinanceRiwayatTableBlock({
               rows.map((row) => (
                 <tr
                   key={row.id}
-                  className="cursor-help border-t border-[#efe2d1] dark:border-[#33261b]"
+                  className={`border-t border-[#efe2d1] dark:border-[#33261b] ${
+                    onRowDoubleClick ? "cursor-pointer" : "cursor-help"
+                  }`}
                   {...bindRowHover(row)}
+                  onClick={onRowDoubleClick ? (e) => handleRowOpenInvoice(row, e) : undefined}
                 >
                   <td className="whitespace-nowrap px-3 py-2.5">{row.tanggal || "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-xs text-[#6b5238] dark:text-[#b79a78]">
@@ -415,7 +450,7 @@ function FinanceRiwayatTableBlock({
                   </td>
                   <td className="px-3 py-2.5">{row.pos}</td>
                   <td className="px-3 py-2.5">{formatNominalDisplay(row.nominal)}</td>
-                  <td className="px-3 py-2.5">{statusCellForRow(row)}</td>
+                  <td className="px-3 py-2.5">{actionCellForRow(row)}</td>
                 </tr>
               ))
             )}
@@ -534,10 +569,10 @@ export default function FinancePageClient({
   const [exportUserLabel, setExportUserLabel] = useState("Pengguna");
 
   const effectiveFinanceData = financeData;
-  const financeNotaFull = useMemo(() => {
-    const d = financeNotaDigits.replace(/\D/g, "");
-    return d ? `SR${d}` : "";
-  }, [financeNotaDigits]);
+  const financeNotaFull = useMemo(
+    () => formatSrNotaFromDigits(financeNotaDigits),
+    [financeNotaDigits]
+  );
 
   useEffect(() => {
     if (localDemoMode) {
@@ -1114,8 +1149,13 @@ export default function FinancePageClient({
     }
 
     const notaTrimmed = financeNotaFull;
-    if (!financeNotaDigits.replace(/\D/g, "").length || !normalizeNotaKey(notaTrimmed)) {
-      toast("Isi nomor nota setelah SR (hanya angka).", "error");
+    if (!isValidSrNotaDigits(financeNotaDigits) || !normalizeNotaKey(notaTrimmed)) {
+      toast(
+        sanitizeSrNotaDigits(financeNotaDigits).length > SR_NOTA_MAX_DIGITS
+          ? srNotaDigitsInvalidMessage()
+          : "Isi nomor nota setelah SR (hanya angka).",
+        "error"
+      );
       setIsSubmitting(false);
       return;
     }
@@ -1319,7 +1359,7 @@ export default function FinancePageClient({
       pelaporanBulan: pelaporanYm,
       paymentSplitGroupId: row.paymentSplitGroupId ?? "",
     });
-    setFinanceNotaDigits(String(row.noNota ?? "").replace(/^SR/i, "").replace(/\D/g, ""));
+    setFinanceNotaDigits(sanitizeSrNotaDigits(String(row.noNota ?? "").replace(/^SR/i, "")));
     setInfoMessage("Mode edit finance aktif.");
     setErrorMessage("");
   };
@@ -1452,6 +1492,16 @@ export default function FinancePageClient({
       toast("Pengeluaran berhasil dibatalkan.", "success", "center");
     }
   };
+
+  const handleOpenFinanceInvoice = useCallback(
+    (row: FinanceRow) => {
+      const opened = openFinanceInvoiceTab(row);
+      if (!opened) {
+        toast("Popup diblokir browser. Izinkan popup untuk membuka invoice.", "error");
+      }
+    },
+    [toast]
+  );
 
   const handleApplyRiwayatDates = () => {
     if (financeDraftDateInvalid) {
@@ -1727,7 +1777,11 @@ export default function FinancePageClient({
         </div>
 
         <div className="relative mt-6 border-t border-[#eadcc9]/55 pt-6 dark:border-[#3f3225]/60 sm:mt-7 sm:pt-7">
-          <p className={`${pageSectionTitleClass} !mb-4 sm:!mb-5`}>Daftar riwayat</p>
+          <p className={`${pageSectionTitleClass} !mb-1 sm:!mb-2`}>Daftar riwayat</p>
+          <p className="mb-4 text-[11px] leading-relaxed text-[#7f6344] sm:mb-5 sm:text-xs dark:text-[#b79a78]">
+            Klik baris atau tombol <span className="font-semibold text-[#5c4330] dark:text-[#d9bc95]">Invoice</span>{" "}
+            untuk membuka faktur Second Room (print atau unduh PDF).
+          </p>
           {filterRiwayatBusy ? (
             <div
               className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center gap-3 rounded-2xl bg-[#fffdf9]/75 backdrop-blur-[2px] dark:bg-[#1e1812]/70"
@@ -1757,6 +1811,7 @@ export default function FinancePageClient({
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
             onCancelPengeluaranPayment={cancelPayoutWithConfirm}
+            onRowDoubleClick={handleOpenFinanceInvoice}
           />
 
           <FinanceRiwayatTableBlock
@@ -1770,6 +1825,7 @@ export default function FinancePageClient({
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
             onCancelPengeluaranPayment={cancelPayoutWithConfirm}
+            onRowDoubleClick={handleOpenFinanceInvoice}
           />
 
           <FinanceRiwayatTableBlock
@@ -1784,6 +1840,7 @@ export default function FinancePageClient({
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
             onCancelPengeluaranPayment={cancelPayoutWithConfirm}
+            onRowDoubleClick={handleOpenFinanceInvoice}
           />
 
           <FinanceRiwayatTableBlock
@@ -1798,6 +1855,7 @@ export default function FinancePageClient({
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
             onCancelPengeluaranPayment={cancelPayoutWithConfirm}
+            onRowDoubleClick={handleOpenFinanceInvoice}
           />
 
           {plKosSewaMinusPengeluaranKos !== null && plManajemenMarginMinusPengeluaran !== null && !isLoading ? (
@@ -1903,7 +1961,7 @@ export default function FinancePageClient({
                 No Nota
               </label>
               <p className="mb-1 text-[11px] text-[#7f6344] dark:text-[#b79a78]">
-                Format: <span className="font-semibold">SR</span> + nomor (isi hanya angka di kanan).
+                Format: <span className="font-semibold">SR</span> + maks. {SR_NOTA_MAX_DIGITS} digit angka.
               </p>
               <div
                 className={`flex min-h-[46px] w-full items-center overflow-hidden rounded-xl border bg-[#fffdf9] text-sm outline-none ring-[#c09c70] sm:min-h-[42px] sm:rounded-2xl dark:bg-[#2b2016] ${
@@ -1920,11 +1978,12 @@ export default function FinancePageClient({
                   required
                   inputMode="numeric"
                   autoComplete="off"
+                  maxLength={SR_NOTA_MAX_DIGITS}
                   value={financeNotaDigits}
                   onChange={(event) => {
-                    const digits = event.target.value.replace(/\D/g, "");
+                    const digits = sanitizeSrNotaDigits(event.target.value);
                     setFinanceNotaDigits(digits);
-                    setForm((prev) => ({ ...prev, noNota: digits ? `SR${digits}` : "" }));
+                    setForm((prev) => ({ ...prev, noNota: formatSrNotaFromDigits(digits) }));
                     if (errorMessage) setErrorMessage("");
                   }}
                   aria-invalid={Boolean(localNotaConflictMessage || remoteNotaConflictMessage)}
@@ -1934,7 +1993,7 @@ export default function FinancePageClient({
                       : undefined
                   }
                   className="min-h-0 min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-[16px] outline-none placeholder:text-[#9d7e55]/70 sm:py-2.5 sm:text-sm"
-                  placeholder="contoh: 24001"
+                  placeholder="contoh: 0001"
                 />
               </div>
               {localNotaConflictMessage || remoteNotaConflictMessage ? (
@@ -2162,7 +2221,7 @@ export default function FinancePageClient({
               disabled={
                 isSubmitting ||
                 effectivePosOptions.length === 0 ||
-                !financeNotaDigits.replace(/\D/g, "").length ||
+                !isValidSrNotaDigits(financeNotaDigits) ||
                 Boolean(localNotaConflictMessage || remoteNotaConflictMessage)
               }
               iconClassName={iconTone.success}

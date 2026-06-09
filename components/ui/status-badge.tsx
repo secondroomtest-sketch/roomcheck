@@ -10,6 +10,7 @@ const statusToneMap: Record<string, string> = {
   booking: "bg-blue-100 text-blue-700 dark:bg-blue-200 dark:text-blue-900",
   stay: "bg-emerald-100 text-emerald-700 dark:bg-emerald-200 dark:text-emerald-900",
   survey: "bg-amber-100 text-amber-700 dark:bg-amber-200 dark:text-amber-900",
+  history: "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100",
   pemasukan: "bg-emerald-100 text-emerald-700 dark:bg-emerald-200 dark:text-emerald-900",
   "pemasukan kos": "bg-lime-100 text-lime-800 dark:bg-lime-200 dark:text-lime-900",
   "pemasukan manajemen": "bg-emerald-700 text-emerald-50 dark:bg-emerald-800 dark:text-emerald-50",

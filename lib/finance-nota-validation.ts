@@ -58,3 +58,48 @@ export function findFinanceRowWithDuplicateNota(
 export function financeNotaTakenMessage(notaTrimmed: string): string {
   return `Nomor nota "${notaTrimmed}" sudah terpakai. Hapus transaksi lama atau gunakan nomor lain.`;
 }
+
+/** Maksimal digit angka setelah prefiks SR. */
+export const SR_NOTA_MAX_DIGITS = 4;
+
+/** Ambil hanya angka setelah prefiks SR, dibatasi maksimal 4 digit. */
+export function sanitizeSrNotaDigits(raw: string): string {
+  return String(raw ?? "")
+    .replace(/\D/g, "")
+    .slice(0, SR_NOTA_MAX_DIGITS);
+}
+
+export function formatSrNotaFromDigits(digits: string): string {
+  const d = sanitizeSrNotaDigits(digits);
+  return d ? `SR${d}` : "";
+}
+
+export function isValidSrNotaDigits(digits: string): boolean {
+  const d = sanitizeSrNotaDigits(digits);
+  return d.length > 0 && d.length <= SR_NOTA_MAX_DIGITS;
+}
+
+export function srNotaDigitsInvalidMessage(): string {
+  return `Nomor nota setelah SR maksimal ${SR_NOTA_MAX_DIGITS} digit angka.`;
+}
+
+type LastUsedSrNotaRow = { noNota?: string | null; no_nota?: string | null };
+
+/** Nota SR dengan nilai numerik tertinggi dari daftar baris finance. */
+export function findLastUsedSrNota(rows: LastUsedSrNotaRow[]): string | null {
+  let bestNum = -1;
+  let bestFormatted = "";
+  for (const r of rows) {
+    const raw = String(r.noNota ?? r.no_nota ?? "").trim();
+    if (!/^sr/i.test(raw)) continue;
+    const digits = sanitizeSrNotaDigits(raw.replace(/^sr/i, ""));
+    if (!digits) continue;
+    const n = Number.parseInt(digits, 10);
+    if (!Number.isFinite(n)) continue;
+    if (n > bestNum) {
+      bestNum = n;
+      bestFormatted = formatSrNotaFromDigits(digits);
+    }
+  }
+  return bestFormatted || null;
+}

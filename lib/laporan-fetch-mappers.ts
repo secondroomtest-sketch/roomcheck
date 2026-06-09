@@ -44,8 +44,9 @@ export function mapCloudKamarRow(row: Record<string, unknown>): ReportKamarRow {
 }
 
 export function mapCloudPenghuniRow(row: Record<string, unknown>): PenghuniRow {
-  const statusRaw = String(row.status ?? "Booking");
-  const status: PenghuniRow["status"] = statusRaw.toLowerCase() === "stay" ? "Stay" : "Booking";
+  const statusRaw = String(row.status ?? "Booking").trim().toLowerCase();
+  const status: PenghuniRow["status"] =
+    statusRaw === "stay" ? "Stay" : statusRaw === "history" ? "History" : "Booking";
 
   const mapped: PenghuniRow = {
     id: String(row.id ?? ""),

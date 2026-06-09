@@ -19,9 +19,15 @@ function mapKamarDbToUi(row: Record<string, unknown>): KamarRow {
   };
 }
 
+function mapPenghuniStatusFromDb(raw: unknown): PenghuniRow["status"] {
+  const s = String(raw ?? "Booking").trim().toLowerCase();
+  if (s === "stay") return "Stay";
+  if (s === "history") return "History";
+  return "Booking";
+}
+
 function mapDbRowToUi(row: Record<string, unknown>): PenghuniRow {
-  const statusRaw = String(row.status ?? "Booking");
-  const status: PenghuniRow["status"] = statusRaw === "Stay" ? "Stay" : "Booking";
+  const status = mapPenghuniStatusFromDb(row.status);
 
   const mapped: PenghuniRow = {
     id: String(row.id ?? ""),

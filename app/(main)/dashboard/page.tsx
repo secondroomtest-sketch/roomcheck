@@ -612,7 +612,12 @@ export default function DashboardPage() {
       hargaBulanan: String(row.harga_bulanan ?? ""),
       bookingFee: String(row.booking_fee ?? ""),
       noWa: String(row.no_wa ?? ""),
-      status: String(row.status ?? "").toLowerCase() === "stay" ? "Stay" : "Booking",
+      status: (() => {
+        const s = String(row.status ?? "").trim().toLowerCase();
+        if (s === "stay") return "Stay" as const;
+        if (s === "history") return "History" as const;
+        return "Booking" as const;
+      })(),
       keterangan: String(row.keterangan ?? ""),
       createdAt: row.created_at ? String(row.created_at) : null,
     });
@@ -887,7 +892,7 @@ export default function DashboardPage() {
   ]);
 
   const penghuniForTable = useMemo(() => {
-    let rows = [...penghuniRows];
+    let rows = penghuniRows.filter((r) => r.status !== "History");
     if (lokasiFilterActive(selectedLokasi)) {
       rows = rows.filter((r) => r.lokasiKos === selectedLokasi);
     }
