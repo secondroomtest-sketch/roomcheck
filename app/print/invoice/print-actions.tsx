@@ -33,26 +33,19 @@ export default function PrintActions({ noNota }: PrintActionsProps) {
       const pdfWidth = 210;
       const pdfHeight = 297;
       const margin = 8;
-      const contentWidth = pdfWidth - margin * 2;
-      const pageContentHeight = pdfHeight - margin * 2;
-      const imageHeight = (canvas.height * contentWidth) / canvas.width;
+      const maxWidth = pdfWidth - margin * 2;
+      const maxHeight = pdfHeight - margin * 2;
 
-      if (imageHeight <= pageContentHeight) {
-        pdf.addImage(imgData, "PNG", margin, margin, contentWidth, imageHeight, undefined, "FAST");
-      } else {
-        let remainingHeight = imageHeight;
-        let positionY = margin;
-
-        pdf.addImage(imgData, "PNG", margin, positionY, contentWidth, imageHeight, undefined, "FAST");
-        remainingHeight -= pageContentHeight;
-
-        while (remainingHeight > 0) {
-          positionY = remainingHeight - imageHeight + margin;
-          pdf.addPage();
-          pdf.addImage(imgData, "PNG", margin, positionY, contentWidth, imageHeight, undefined, "FAST");
-          remainingHeight -= pageContentHeight;
-        }
+      // Selalu muat 1 lembar A4 (scale down jika konten lebih tinggi).
+      let imgWidth = maxWidth;
+      let imgHeight = (canvas.height * imgWidth) / canvas.width;
+      if (imgHeight > maxHeight) {
+        imgHeight = maxHeight;
+        imgWidth = (canvas.width * imgHeight) / canvas.height;
       }
+      const x = margin + (maxWidth - imgWidth) / 2;
+      const y = margin + Math.max(0, (maxHeight - imgHeight) / 2) * 0.15;
+      pdf.addImage(imgData, "PNG", x, y, imgWidth, imgHeight, undefined, "FAST");
 
       pdf.save(invoicePdfFileName(noNota ?? ""));
     } finally {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { Printer, Download, Mail, ArrowLeft } from "lucide-react";
 import { LAPORAN_EXPORT_STORAGE_KEY, type LaporanExportPayloadV1 } from "@/lib/laporan-export-types";
@@ -10,11 +9,7 @@ import {
   filterPemasukanRowsForLaporanCetak,
   filterPengeluaranRowsForLaporanCetak,
 } from "@/lib/laporan-cetak-filters";
-import {
-  buildEmailBodySummary,
-  buildLaporanStandaloneHtml,
-  fetchReportLogoDataUrl,
-} from "@/lib/laporan-export-html";
+import { buildEmailBodySummary } from "@/lib/laporan-export-html";
 import { LAPORAN_CARD_SURFACE_CLASSES } from "@/lib/laporan-dashboard-card-styles";
 
 function formatRp(n: number): string {
@@ -38,7 +33,6 @@ function formatId(iso: string): string {
 export default function LaporanCetakClient() {
   const [payload, setPayload] = useState<LaporanExportPayloadV1 | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [htmlDownloadBusy, setHtmlDownloadBusy] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -97,22 +91,9 @@ export default function LaporanCetakClient() {
     window.print();
   };
 
-  const handleDownloadHtml = async () => {
-    if (!payload) return;
-    setHtmlDownloadBusy(true);
-    try {
-      const logoDataUrl = await fetchReportLogoDataUrl("/roomcheck-logo-transparent.png");
-      const html = buildLaporanStandaloneHtml(payload, { logoDataUrl });
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `laporan-second-room-${payload.generatedAt.slice(0, 10)}.html`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setHtmlDownloadBusy(false);
-    }
+  /** Unduh PDF via dialog Print browser — hasil layout jauh lebih rapih (page-break CSS). */
+  const handleDownloadPdf = () => {
+    window.print();
   };
 
   const handleEmail = () => {
@@ -192,12 +173,12 @@ export default function LaporanCetakClient() {
             </button>
             <button
               type="button"
-              onClick={() => void handleDownloadHtml()}
-              disabled={htmlDownloadBusy}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#8f734f] bg-white px-4 py-2 text-xs font-semibold text-[#2d2115] disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={handleDownloadPdf}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#8f734f] bg-white px-4 py-2 text-xs font-semibold text-[#2d2115]"
+              title='Di dialog print, pilih "Save as PDF" / "Microsoft Print to PDF"'
             >
               <Download size={14} aria-hidden />
-              {htmlDownloadBusy ? "Menyiapkan…" : "Unduh HTML"}
+              Unduh PDF
             </button>
             <button
               type="button"
@@ -214,18 +195,15 @@ export default function LaporanCetakClient() {
         </div>
       </div>
 
-      <article className="mx-auto max-w-5xl px-4 py-8 print:py-4 print:px-2">
+      <article id="laporan-cetak-sheet" className="mx-auto max-w-5xl px-4 py-8 print:py-4 print:px-2">
         <header className="mb-8 flex flex-col gap-6 border-b border-[#e8dcc9] pb-8 sm:flex-row sm:items-start sm:justify-between print:mb-4 print:pb-4">
           <div className="flex gap-5">
             <div className="relative h-[72px] w-[180px] shrink-0">
-              <Image
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src="/roomcheck-logo-transparent.png"
                 alt="Second Room"
-                fill
-                className="object-contain object-left"
-                sizes="180px"
-                priority
-                unoptimized
+                className="h-full w-full object-contain object-left"
               />
             </div>
             <div>
@@ -233,12 +211,8 @@ export default function LaporanCetakClient() {
                 Second Room — laporan operasional
               </p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#2c2218] print:text-xl">
-                Ringkasan seperti dashboard
+                Laporan Lengkap Second Room
               </h1>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#5c472d]">
-                Data dari modul Finance, Kamar, Penghuni, dan Survey (calon). Filter lokasi/unit diterapkan pada
-                kamar, penghuni, dan survey; rentang tanggal pada ringkasan finance.
-              </p>
             </div>
           </div>
           <aside className="w-full max-w-sm rounded-2xl border border-[#dcc7aa] bg-white p-4 text-sm text-[#4a3824] shadow-sm sm:w-auto">
@@ -254,7 +228,7 @@ export default function LaporanCetakClient() {
               </div>
               <div>
                 <dt className="font-semibold text-[#6b5238]">Sumber data</dt>
-                <dd>Supabase (cloud)</dd>
+                <dd>Aplikasi RoomCheck</dd>
               </div>
               <div>
                 <dt className="font-semibold text-[#6b5238]">Periode finance</dt>
@@ -278,15 +252,11 @@ export default function LaporanCetakClient() {
                       : "Laporan lengkap"}
                 </dd>
               </div>
-              <div>
-                <dt className="font-semibold text-[#6b5238]">Role (revenue)</dt>
-                <dd>{payload.userProfileRole || "—"}</dd>
-              </div>
             </dl>
           </aside>
         </header>
 
-        <section className="mb-10 print:mb-4">
+        <section className="mb-10 sr-print-section print:mb-4">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-[#8c6d47]">
             Ringkasan dashboard
           </h2>
@@ -294,7 +264,7 @@ export default function LaporanCetakClient() {
             {cards.map((card, i) => (
               <div
                 key={`${card.label}-${i}`}
-                className={`rounded-2xl border-2 p-4 shadow-sm print:break-inside-avoid ${LAPORAN_CARD_SURFACE_CLASSES[i % LAPORAN_CARD_SURFACE_CLASSES.length]}`}
+                className={`sr-print-keep rounded-2xl border-2 p-4 shadow-sm ${LAPORAN_CARD_SURFACE_CLASSES[i % LAPORAN_CARD_SURFACE_CLASSES.length]}`}
               >
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8c6d47]">{card.label}</p>
                 <p className="mt-1 text-2xl font-semibold text-[#2c2218] print:text-xl">{card.value}</p>
@@ -335,7 +305,7 @@ export default function LaporanCetakClient() {
           </div>
         </section>
 
-        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm print:break-inside-avoid">
+        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm sr-print-section">
           <h2 className="mb-4 text-base font-semibold text-[#2c2218]">Keuangan per bulan</h2>
           <div className="space-y-4">
             {payload.monthly.length === 0 ? (
@@ -345,7 +315,7 @@ export default function LaporanCetakClient() {
                 const fk = payload.laporanFokus;
                 if (fk === "kos") {
                   return (
-                    <div key={m.month}>
+                    <div key={m.month} className="sr-print-keep">
                       <div className="mb-1 flex flex-col gap-1 text-xs text-[#5c472d] sm:flex-row sm:justify-between">
                         <span className="font-medium">{m.month}</span>
                         <span className="text-right text-[10px] leading-snug sm:text-xs">
@@ -371,7 +341,7 @@ export default function LaporanCetakClient() {
                 }
                 if (fk === "manajemen") {
                   return (
-                    <div key={m.month}>
+                    <div key={m.month} className="sr-print-keep">
                       <div className="mb-1 flex flex-col gap-1 text-xs text-[#5c472d] sm:flex-row sm:justify-between">
                         <span className="font-medium">{m.month}</span>
                         <span className="text-right text-[10px] leading-snug sm:text-xs">
@@ -396,7 +366,7 @@ export default function LaporanCetakClient() {
                   );
                 }
                 return (
-                  <div key={m.month}>
+                  <div key={m.month} className="sr-print-keep">
                     <div className="mb-1 flex flex-col gap-1 text-xs text-[#5c472d] sm:flex-row sm:justify-between">
                       <span className="font-medium">{m.month}</span>
                       <span className="text-right text-[10px] leading-snug sm:text-xs">
@@ -438,10 +408,10 @@ export default function LaporanCetakClient() {
           </div>
         </section>
 
-        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm print:break-inside-avoid">
+        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm sr-print-section sr-print-keep">
           <h2 className="mb-4 text-base font-semibold text-[#2c2218]">Status kamar</h2>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table className="sr-print-table min-w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-[#e8dcc9] text-xs uppercase tracking-[0.12em] text-[#8c6d47]">
                   <th className="py-2 pr-4">Status</th>
@@ -460,13 +430,13 @@ export default function LaporanCetakClient() {
           </div>
         </section>
 
-        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-base font-semibold text-[#2c2218]">
+        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm sr-print-section">
+          <h2 className="mb-4 text-base font-semibold text-[#2c2218] sr-print-keep">
             Detail pemasukan ({financeRowCounts.pem}
             {financeRowCounts.pem > maxFinance ? `, menampilkan ${maxFinance}` : ""})
           </h2>
-          <div className="max-h-[28rem] overflow-auto print:max-h-none">
-            <table className="min-w-full text-left text-xs">
+          <div className="max-h-[28rem] overflow-auto print:max-h-none print:overflow-visible">
+            <table className="sr-print-table min-w-full text-left text-xs">
               <thead className="sticky top-0 bg-[#f4e6d0] text-[#4a3824] print:static">
                 <tr>
                   <th className="px-2 py-2">Tanggal</th>
@@ -478,7 +448,7 @@ export default function LaporanCetakClient() {
               </thead>
               <tbody>
                 {pemFinanceTable.map((row) => (
-                  <tr key={row.id} className="border-b border-[#f4eadc]">
+                  <tr key={row.id} className="border-b border-[#f4eadc] sr-print-tr">
                     <td className="px-2 py-1.5 whitespace-nowrap">{row.tanggal}</td>
                     <td className="px-2 py-1.5">{row.pos?.trim() || "—"}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{formatRp(row.nominal)}</td>
@@ -491,13 +461,13 @@ export default function LaporanCetakClient() {
           </div>
         </section>
 
-        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-base font-semibold text-[#2c2218]">
+        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm sr-print-section">
+          <h2 className="mb-4 text-base font-semibold text-[#2c2218] sr-print-keep">
             Detail pengeluaran ({financeRowCounts.peng}
             {financeRowCounts.peng > maxFinance ? `, menampilkan ${maxFinance}` : ""})
           </h2>
-          <div className="max-h-[28rem] overflow-auto print:max-h-none">
-            <table className="min-w-full text-left text-xs">
+          <div className="max-h-[28rem] overflow-auto print:max-h-none print:overflow-visible">
+            <table className="sr-print-table min-w-full text-left text-xs">
               <thead className="sticky top-0 bg-[#f4e6d0] text-[#4a3824] print:static">
                 <tr>
                   <th className="px-2 py-2">Tanggal</th>
@@ -508,7 +478,7 @@ export default function LaporanCetakClient() {
               </thead>
               <tbody>
                 {pengFinanceTable.map((row) => (
-                  <tr key={row.id} className="border-b border-[#f4eadc]">
+                  <tr key={row.id} className="border-b border-[#f4eadc] sr-print-tr">
                     <td className="px-2 py-1.5 whitespace-nowrap">{row.tanggal}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{formatRp(row.nominal)}</td>
                     <td className="px-2 py-1.5">{row.lokasiKos}</td>
@@ -520,10 +490,10 @@ export default function LaporanCetakClient() {
           </div>
         </section>
 
-        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm print:break-inside-avoid">
-          <h2 className="mb-4 text-base font-semibold text-[#2c2218]">Penghuni ({payload.penghuniRows.length})</h2>
-          <div className="max-h-80 overflow-auto print:max-h-none">
-            <table className="min-w-full text-left text-xs">
+        <section className="mb-10 rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm sr-print-section">
+          <h2 className="mb-4 text-base font-semibold text-[#2c2218] sr-print-keep">Penghuni ({payload.penghuniRows.length})</h2>
+          <div className="max-h-80 overflow-auto print:max-h-none print:overflow-visible">
+            <table className="sr-print-table min-w-full text-left text-xs">
               <thead className="sticky top-0 bg-[#f4e6d0] text-[#4a3824] print:static">
                 <tr>
                   <th className="px-2 py-2">Nama</th>
@@ -537,7 +507,7 @@ export default function LaporanCetakClient() {
               </thead>
               <tbody>
                 {payload.penghuniRows.map((row, i) => (
-                  <tr key={`${row.namaLengkap}-${i}`} className="border-b border-[#f4eadc]">
+                  <tr key={`${row.namaLengkap}-${i}`} className="border-b border-[#f4eadc] sr-print-tr">
                     <td className="px-2 py-1.5 font-medium">{row.namaLengkap}</td>
                     <td className="px-2 py-1.5">{row.lokasiKos}</td>
                     <td className="px-2 py-1.5">{row.unitBlok}</td>
@@ -552,10 +522,10 @@ export default function LaporanCetakClient() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm print:break-inside-avoid">
-          <h2 className="mb-4 text-base font-semibold text-[#2c2218]">Calon survey ({payload.surveyRows.length})</h2>
-          <div className="max-h-72 overflow-auto print:max-h-none">
-            <table className="min-w-full text-left text-xs">
+        <section className="rounded-2xl border border-[#dcc7aa] bg-white p-5 shadow-sm sr-print-section">
+          <h2 className="mb-4 text-base font-semibold text-[#2c2218] sr-print-keep">Calon survey ({payload.surveyRows.length})</h2>
+          <div className="max-h-72 overflow-auto print:max-h-none print:overflow-visible">
+            <table className="sr-print-table min-w-full text-left text-xs">
               <thead className="sticky top-0 bg-[#f4e6d0] text-[#4a3824] print:static">
                 <tr>
                   <th className="px-2 py-2">Nama</th>
@@ -566,7 +536,7 @@ export default function LaporanCetakClient() {
               </thead>
               <tbody>
                 {payload.surveyRows.map((row, i) => (
-                  <tr key={`${row.namaLengkap}-${i}`} className="border-b border-[#f4eadc]">
+                  <tr key={`${row.namaLengkap}-${i}`} className="border-b border-[#f4eadc] sr-print-tr">
                     <td className="px-2 py-1.5 font-medium">{row.namaLengkap}</td>
                     <td className="px-2 py-1.5">{row.lokasiKos}</td>
                     <td className="px-2 py-1.5">{row.unitBlok}</td>
@@ -580,7 +550,62 @@ export default function LaporanCetakClient() {
 
         <style
           dangerouslySetInnerHTML={{
-            __html: `@media print { .sr-cetak-toolbar { display: none !important; } }`,
+            __html: `
+              @page {
+                size: A4 portrait;
+                margin: 10mm;
+              }
+              @media print {
+                html, body {
+                  background: #fff !important;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .sr-cetak-toolbar {
+                  display: none !important;
+                }
+                #laporan-cetak-sheet {
+                  max-width: none !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                }
+                .sr-print-section {
+                  break-inside: auto;
+                  page-break-inside: auto;
+                }
+                .sr-print-keep,
+                .sr-print-tr,
+                .sr-print-table tr,
+                .sr-print-table thead,
+                header {
+                  break-inside: avoid;
+                  page-break-inside: avoid;
+                }
+                .sr-print-table {
+                  width: 100% !important;
+                  border-collapse: collapse !important;
+                }
+                .sr-print-table thead {
+                  display: table-header-group;
+                }
+                .sr-print-table tbody {
+                  display: table-row-group;
+                }
+                .sr-print-table tr {
+                  page-break-inside: avoid;
+                  break-inside: avoid;
+                }
+                h2 {
+                  break-after: avoid;
+                  page-break-after: avoid;
+                }
+                /* Hindari potongan di tengah sel / teks panjang */
+                td, th {
+                  break-inside: avoid;
+                  page-break-inside: avoid;
+                }
+              }
+            `,
           }}
         />
       </article>

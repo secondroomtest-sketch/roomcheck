@@ -760,7 +760,7 @@ export default function LaporanPageClient({
         toast("Penyimpanan penuh. Kurangi data atau kosongkan situs.", "error");
         return;
       }
-      toast("Tab laporan lengkap dibuka. Gunakan Print, Unduh HTML, atau Email di sana.", "success");
+      toast("Tab laporan lengkap dibuka. Gunakan Print, Unduh PDF, atau Email di sana.", "success");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Gagal menyiapkan laporan.";
       setErrorMessage(msg);

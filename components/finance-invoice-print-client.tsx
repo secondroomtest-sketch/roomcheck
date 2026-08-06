@@ -7,7 +7,10 @@ import type { FinanceInvoicePayloadV1 } from "@/lib/finance-invoice-types";
 import {
   formatInvoiceDateLong,
   formatInvoiceNominal,
+  invoiceNeedsPenghuniStayDates,
   readFinanceInvoicePayload,
+  resolvePenghuniStayDatesForInvoice,
+  writeFinanceInvoicePayload,
 } from "@/lib/finance-open-invoice-tab";
 
 function formatGeneratedAt(iso: string): string {
@@ -47,6 +50,25 @@ export default function FinanceInvoicePrintClient() {
     }
     loadedTokenRef.current = token;
     setPayload(data);
+
+    if (!invoiceNeedsPenghuniStayDates(data) || (data.tglCheckIn && data.tglCheckOut)) return;
+
+    let cancelled = false;
+    void (async () => {
+      const stay = await resolvePenghuniStayDatesForInvoice(data);
+      if (cancelled || !stay) return;
+      const next = {
+        ...data,
+        tglCheckIn: stay.tglCheckIn || data.tglCheckIn,
+        tglCheckOut: stay.tglCheckOut || data.tglCheckOut,
+      };
+      writeFinanceInvoicePayload(token, next);
+      setPayload(next);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   if (loadError) {
@@ -69,13 +91,17 @@ export default function FinanceInvoicePrintClient() {
 
   const isPemasukan = payload.kategori === "Pemasukan";
   const docTitle = isPemasukan ? "Invoice Pembayaran" : "Bukti Pengeluaran";
-  const pelaporanLabel = payload.pelaporanBulan?.trim()
-    ? payload.pelaporanBulan.trim().slice(0, 7)
-    : "—";
+  const showStayDates = invoiceNeedsPenghuniStayDates(payload);
   const namaDisplay = payload.namaPenghuni?.trim() || (isPemasukan ? "—" : "Operasional");
   const lokasiDisplay = payload.lokasiKos?.trim() || "—";
   const unitDisplay = payload.unitBlok?.trim() || "—";
   const keteranganDisplay = payload.keterangan?.trim() || "—";
+  const checkInDisplay = payload.tglCheckIn?.trim()
+    ? formatInvoiceDateLong(payload.tglCheckIn)
+    : "—";
+  const checkOutDisplay = payload.tglCheckOut?.trim()
+    ? formatInvoiceDateLong(payload.tglCheckOut)
+    : "—";
 
   return (
     <main className="safe-print-screen" style={{ background: "#f3f0ff", minHeight: "100vh", margin: 0 }}>
@@ -92,9 +118,8 @@ export default function FinanceInvoicePrintClient() {
         * { box-sizing: border-box; }
         .page {
           max-width: 210mm;
-          min-height: 297mm;
           margin: 0 auto;
-          padding: 14mm 14mm 16mm;
+          padding: 10mm 10mm 12mm;
           color: var(--ink);
           font-family: "Segoe UI", Arial, sans-serif;
         }
@@ -102,7 +127,7 @@ export default function FinanceInvoicePrintClient() {
           display: flex;
           justify-content: flex-end;
           gap: 10px;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
         }
         .actionBtn {
           border: 1px solid var(--line);
@@ -121,161 +146,197 @@ export default function FinanceInvoicePrintClient() {
         }
         .actionBtn:disabled { opacity: 0.6; cursor: not-allowed; }
         .sheet {
+          width: 100%;
+          max-width: 190mm;
+          margin: 0 auto;
           border: 1px solid var(--line);
-          border-radius: 18px;
+          border-radius: 14px;
           overflow: hidden;
           background: #fff;
           box-shadow: 0 24px 60px -40px rgba(45, 31, 72, 0.45);
         }
         .hero {
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           justify-content: space-between;
-          gap: 20px;
-          padding: 28px 28px 24px;
-          background: linear-gradient(135deg, #2d1f48 0%, #4a3278 48%, #6b4fa3 100%);
-          color: #f8f5ff;
+          align-items: center;
+          gap: 14px;
+          padding: 16px 18px;
+          background: linear-gradient(180deg, #ffffff 0%, #f8f5ff 100%);
+          border-bottom: 1px solid var(--line);
+          color: var(--ink);
         }
         .brand {
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 12px;
           min-width: 0;
         }
         .logoMark {
-          width: 72px;
-          height: 72px;
+          width: 52px;
+          height: 52px;
           object-fit: contain;
           flex-shrink: 0;
-          border-radius: 16px;
-          background: rgba(255,255,255,0.12);
-          padding: 8px;
+          border-radius: 12px;
+          background: #fff;
+          border: 1px solid var(--line);
+          padding: 5px;
         }
         .logoFallback {
-          width: 72px;
-          height: 72px;
-          border-radius: 16px;
-          background: linear-gradient(135deg, rgba(255,255,255,0.2), rgba(201,165,116,0.35));
+          width: 52px;
+          height: 52px;
+          border-radius: 12px;
+          background: linear-gradient(135deg, #ede8ff, #f3ebe0);
+          border: 1px solid var(--line);
+          color: var(--accent);
           display: flex;
           align-items: center;
           justify-content: center;
           font-weight: 800;
-          font-size: 22px;
+          font-size: 18px;
           letter-spacing: 0.06em;
           flex-shrink: 0;
         }
         .brandName {
           margin: 0;
-          font-size: 26px;
+          font-size: 20px;
           font-weight: 800;
           letter-spacing: 0.04em;
           line-height: 1.1;
+          color: var(--ink);
         }
         .brandTagline {
-          margin: 6px 0 0;
-          font-size: 12px;
-          letter-spacing: 0.22em;
+          margin: 4px 0 0;
+          font-size: 10px;
+          letter-spacing: 0.18em;
           text-transform: uppercase;
-          color: rgba(248,245,255,0.82);
+          color: var(--muted);
         }
         .docSide {
           text-align: right;
-          min-width: 200px;
+          min-width: 168px;
+          max-width: 240px;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
         }
         .docKind {
           display: inline-block;
-          margin: 0 0 8px;
-          padding: 6px 14px;
-          border-radius: 999px;
-          background: rgba(255,255,255,0.14);
-          border: 1px solid rgba(255,255,255,0.22);
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.18em;
+          width: auto;
+          margin: 0 0 6px;
+          padding: 0;
+          border: none;
+          border-radius: 0;
+          background: transparent;
+          color: var(--accent);
+          font-size: 15px;
+          font-weight: 800;
+          letter-spacing: 0.06em;
           text-transform: uppercase;
+          text-align: right;
+          line-height: 1.2;
+          white-space: nowrap;
+        }
+        .docKindText {
+          display: inline;
+          margin: 0;
+          padding: 0;
+          line-height: inherit;
+          font-weight: inherit;
         }
         .notaBadge {
           margin: 0;
-          font-size: 30px;
+          font-size: 26px;
           font-weight: 800;
           letter-spacing: 0.06em;
+          color: var(--ink);
+          text-align: right;
+          line-height: 1.1;
         }
         .notaLabel {
           margin: 4px 0 0;
-          font-size: 11px;
-          letter-spacing: 0.16em;
+          font-size: 10px;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: rgba(248,245,255,0.75);
+          color: var(--muted);
+          text-align: right;
+          line-height: 1;
         }
-        .body { padding: 24px 28px 28px; }
+        .notaLabelText {
+          display: inline;
+          margin: 0;
+        }
+        .body { padding: 14px 18px 16px; }
         .metaGrid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 12px;
-          margin-bottom: 22px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 12px;
         }
         .metaBox {
           border: 1px solid var(--line);
-          border-radius: 14px;
+          border-radius: 10px;
           background: var(--panel);
-          padding: 12px 14px;
+          padding: 8px 10px;
         }
         .metaBox .k {
-          font-size: 10px;
+          font-size: 9px;
           font-weight: 700;
-          letter-spacing: 0.14em;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
           color: var(--muted);
-          margin-bottom: 6px;
+          margin-bottom: 4px;
         }
         .metaBox .v {
-          font-size: 14px;
+          font-size: 12px;
           font-weight: 600;
           color: var(--ink);
-          line-height: 1.35;
+          line-height: 1.3;
         }
         .sectionTitle {
-          margin: 0 0 12px;
-          font-size: 12px;
+          margin: 0 0 8px;
+          font-size: 11px;
           font-weight: 800;
-          letter-spacing: 0.18em;
+          letter-spacing: 0.16em;
           text-transform: uppercase;
           color: var(--accent);
         }
         .partyCard {
           border: 1px solid var(--line);
-          border-radius: 16px;
-          padding: 16px 18px;
-          margin-bottom: 22px;
+          border-radius: 12px;
+          padding: 10px 12px;
+          margin-bottom: 12px;
           background: linear-gradient(180deg, #fff 0%, #faf8ff 100%);
         }
         .partyGrid {
           display: grid;
-          grid-template-columns: 120px 1fr;
-          gap: 10px 14px;
-          font-size: 14px;
+          grid-template-columns: 100px 1fr;
+          gap: 6px 12px;
+          font-size: 13px;
         }
         .partyGrid .label { color: var(--muted); font-weight: 600; }
         .partyGrid .value { color: var(--ink); font-weight: 600; }
         .items {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 18px;
+          margin-bottom: 10px;
         }
         .items th {
           text-align: left;
-          font-size: 10px;
-          letter-spacing: 0.14em;
+          font-size: 9px;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
           color: var(--muted);
-          padding: 10px 12px;
+          padding: 6px 8px;
           border-bottom: 2px solid var(--line);
         }
         .items td {
-          padding: 14px 12px;
+          padding: 8px;
           border-bottom: 1px solid #eee8f8;
           vertical-align: top;
-          font-size: 14px;
+          font-size: 12px;
+          line-height: 1.4;
         }
         .items .amount {
           text-align: right;
@@ -285,71 +346,83 @@ export default function FinanceInvoicePrintClient() {
         }
         .totalBox {
           margin-left: auto;
-          max-width: 320px;
-          border-radius: 16px;
-          padding: 16px 18px;
+          max-width: 260px;
+          border-radius: 12px;
+          padding: 10px 12px;
           background: ${isPemasukan ? "linear-gradient(135deg,#ecfdf5,#d1fae5)" : "linear-gradient(135deg,#fff1f2,#ffe4e6)"};
           border: 1px solid ${isPemasukan ? "#86efac" : "#fda4af"};
         }
         .totalBox .k {
-          font-size: 11px;
+          font-size: 10px;
           font-weight: 700;
-          letter-spacing: 0.14em;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
           color: ${isPemasukan ? "#166534" : "#9f1239"};
         }
         .totalBox .v {
-          margin-top: 6px;
-          font-size: 28px;
+          margin-top: 4px;
+          font-size: 22px;
           font-weight: 800;
           color: ${isPemasukan ? "#14532d" : "#881337"};
         }
         .note {
-          margin-top: 22px;
-          padding: 14px 16px;
-          border-radius: 14px;
+          margin-top: 12px;
+          padding: 10px 12px;
+          border-radius: 10px;
           background: #faf8ff;
           border: 1px dashed var(--line);
-          font-size: 13px;
-          line-height: 1.55;
+          font-size: 11px;
+          line-height: 1.45;
           color: #5c4d78;
         }
         .footer {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 24px;
-          margin-top: 28px;
-          padding-top: 18px;
+          gap: 14px;
+          margin-top: 14px;
+          padding-top: 12px;
           border-top: 1px solid var(--line);
         }
         .signBox {
-          min-height: 92px;
+          min-height: 64px;
           border: 1px dashed #cbbfe5;
-          border-radius: 12px;
-          padding: 12px 14px;
+          border-radius: 10px;
+          padding: 8px 10px;
         }
         .signLabel {
-          font-size: 11px;
+          font-size: 10px;
           font-weight: 700;
-          letter-spacing: 0.12em;
+          letter-spacing: 0.1em;
           text-transform: uppercase;
           color: var(--muted);
         }
         .footNote {
-          margin-top: 18px;
+          margin-top: 10px;
           text-align: center;
-          font-size: 11px;
+          font-size: 10px;
+          line-height: 1.4;
           color: var(--muted);
         }
-        @page { size: A4 portrait; margin: 10mm; }
+        @page { size: A4 portrait; margin: 8mm; }
         @media print {
+          html, body { background: #fff !important; }
           .no-print { display: none !important; }
           .page { max-width: none; min-height: auto; padding: 0; background: #fff; }
-          .sheet { border: none; box-shadow: none; border-radius: 0; }
+          .sheet {
+            width: 100%;
+            max-width: none;
+            border: none;
+            box-shadow: none;
+            border-radius: 0;
+          }
         }
         @media (max-width: 640px) {
+          .hero { flex-wrap: wrap; }
           .metaGrid { grid-template-columns: 1fr; }
-          .docSide { text-align: left; width: 100%; }
+          .docSide { text-align: left; width: 100%; max-width: none; align-items: flex-start; }
+          .docKind { text-align: left; }
+          .notaBadge { text-align: left; }
+          .notaLabel { text-align: left; }
           .partyGrid { grid-template-columns: 1fr; }
         }
       `}</style>
@@ -380,9 +453,13 @@ export default function FinanceInvoicePrintClient() {
               </div>
             </div>
             <div className="docSide">
-              <p className="docKind">{docTitle}</p>
+              <div className="docKind">
+                <span className="docKindText">{docTitle}</span>
+              </div>
               <p className="notaBadge">{payload.noNota || "—"}</p>
-              <p className="notaLabel">Nomor Nota</p>
+              <p className="notaLabel">
+                <span className="notaLabelText">Nomor Nota</span>
+              </p>
             </div>
           </div>
 
@@ -391,10 +468,6 @@ export default function FinanceInvoicePrintClient() {
               <div className="metaBox">
                 <div className="k">Tanggal transaksi</div>
                 <div className="v">{formatInvoiceDateLong(payload.tanggal)}</div>
-              </div>
-              <div className="metaBox">
-                <div className="k">Bulan P&amp;L</div>
-                <div className="v">{pelaporanLabel}</div>
               </div>
               <div className="metaBox">
                 <div className="k">Diterbitkan</div>
@@ -411,6 +484,14 @@ export default function FinanceInvoicePrintClient() {
                 <div className="value">{lokasiDisplay}</div>
                 <div className="label">Blok / unit</div>
                 <div className="value">{unitDisplay}</div>
+                {showStayDates ? (
+                  <>
+                    <div className="label">Check in</div>
+                    <div className="value">{checkInDisplay}</div>
+                    <div className="label">Check out</div>
+                    <div className="value">{checkOutDisplay}</div>
+                  </>
+                ) : null}
               </div>
             </div>
 
@@ -466,8 +547,7 @@ export default function FinanceInvoicePrintClient() {
             </div>
 
             <p className="footNote">
-              Second Room — dokumen dihasilkan otomatis dari aplikasi RoomCheck Finance. Cetak atau unduh PDF
-              melalui tombol di atas.
+              Official receipt from Second Room — Simpan dokumen ini sebagai bukti transaksi yang valid.
             </p>
           </div>
         </div>

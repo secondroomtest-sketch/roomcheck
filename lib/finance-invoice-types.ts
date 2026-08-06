@@ -17,5 +17,8 @@ export type FinanceInvoicePayloadV1 = {
   nominal: string;
   keterangan: string;
   pelaporanBulan?: string;
+  /** Dari data penghuni — untuk invoice sewa kamar / booking fee. */
+  tglCheckIn?: string;
+  tglCheckOut?: string;
   generatedAt: string;
 };

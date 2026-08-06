@@ -16,6 +16,11 @@ export function isSewaKamarFinancePos(pos: string): boolean {
   return (pos ?? "").trim().toLowerCase() === FINANCE_POS_SEWA_KAMAR.trim().toLowerCase();
 }
 
+/** POS booking fee (label Master: "Booking fee"). */
+export function isBookingFeeFinancePos(pos: string): boolean {
+  return (pos ?? "").trim().toLowerCase() === "booking fee";
+}
+
 /** Jumlah baris finance dengan nota + jenis POS (sewa vs deposit) yang sama — untuk pecahan sewa multi-baris. */
 export function countFinanceRowsWithSameNotaAndPosKind(
   rows: { noNota: string; pos: string }[],

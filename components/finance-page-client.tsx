@@ -38,6 +38,7 @@ import {
   escapeIlikeExact,
   financeNotaTakenMessage,
   findFinanceRowWithDuplicateNota,
+  findLastUsedSrNota,
   formatSrNotaFromDigits,
   isValidSrNotaDigits,
   normalizeNotaKey,
@@ -212,7 +213,14 @@ function isValidRealUnitForPengeluaranKos(value: string): boolean {
   return true;
 }
 
-type HoverKeteranganState = { id: string; text: string; namaPenghuni: string; x: number; y: number } | null;
+type HoverKeteranganState = {
+  id: string;
+  text: string;
+  namaPenghuni: string;
+  kategori: FinanceType;
+  x: number;
+  y: number;
+} | null;
 
 function FinanceRiwayatTableBlock({
   title,
@@ -256,6 +264,7 @@ function FinanceRiwayatTableBlock({
         id: row.id,
         text: row.keterangan?.trim() || "Tidak ada keterangan.",
         namaPenghuni: (row.namaPenghuni ?? "").trim(),
+        kategori: row.kategori,
         x: e.clientX,
         y: e.clientY,
       }),
@@ -368,7 +377,9 @@ function FinanceRiwayatTableBlock({
                   </div>
                   {(row.namaPenghuni ?? "").trim() ? (
                     <div className="flex justify-between gap-3">
-                      <dt className="text-[#7f6344] dark:text-[#b79a78]">Penghuni</dt>
+                      <dt className="text-[#7f6344] dark:text-[#b79a78]">
+                        {row.kategori === "Pengeluaran" ? "Kepada" : "Penghuni"}
+                      </dt>
                       <dd className="max-w-[65%] text-right text-[#4a3624] dark:text-[#e8d4bc]">
                         {(row.namaPenghuni ?? "").trim()}
                       </dd>
@@ -573,6 +584,8 @@ export default function FinancePageClient({
     () => formatSrNotaFromDigits(financeNotaDigits),
     [financeNotaDigits]
   );
+
+  const lastUsedSrNota = useMemo(() => findLastUsedSrNota(effectiveFinanceData), [effectiveFinanceData]);
 
   useEffect(() => {
     if (localDemoMode) {
@@ -1497,7 +1510,7 @@ export default function FinancePageClient({
     (row: FinanceRow) => {
       const opened = openFinanceInvoiceTab(row);
       if (!opened) {
-        toast("Popup diblokir browser. Izinkan popup untuk membuka invoice.", "error");
+        toast("Gagal membuka invoice. Coba izinkan popup browser.", "error");
       }
     },
     [toast]
@@ -1580,7 +1593,7 @@ export default function FinancePageClient({
         toast("Penyimpanan penuh. Kurangi data atau kosongkan situs.", "error");
         return;
       }
-      toast("Tab laporan lengkap dibuka. Gunakan Print, Unduh HTML, atau Email di sana.", "success");
+      toast("Tab laporan lengkap dibuka. Gunakan Print, Unduh PDF, atau Email di sana.", "success");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Gagal menyiapkan laporan.";
       toast(msg, "error");
@@ -1962,6 +1975,15 @@ export default function FinancePageClient({
               </label>
               <p className="mb-1 text-[11px] text-[#7f6344] dark:text-[#b79a78]">
                 Format: <span className="font-semibold">SR</span> + maks. {SR_NOTA_MAX_DIGITS} digit angka.
+                {lastUsedSrNota ? (
+                  <>
+                    {" "}
+                    · Terakhir dipakai:{" "}
+                    <span className="font-semibold text-[#5c4330] dark:text-[#e8dcc8]">{lastUsedSrNota}</span>
+                  </>
+                ) : (
+                  <> · Belum ada nomor nota sebelumnya.</>
+                )}
               </p>
               <div
                 className={`flex min-h-[46px] w-full items-center overflow-hidden rounded-xl border bg-[#fffdf9] text-sm outline-none ring-[#c09c70] sm:min-h-[42px] sm:rounded-2xl dark:bg-[#2b2016] ${
@@ -2115,12 +2137,18 @@ export default function FinancePageClient({
               </p>
             </div>
             <div>
-              <label className={pageLabelWarmClass}>Nama Penghuni (Opsional)</label>
+              <label className={pageLabelWarmClass}>
+                {form.kategori === "Pengeluaran" ? "Kepada (Opsional)" : "Nama Penghuni (Opsional)"}
+              </label>
               <input
                 value={form.namaPenghuni}
                 onChange={(event) => setForm((prev) => ({ ...prev, namaPenghuni: event.target.value }))}
                 className={pageFieldWarmClass}
-                placeholder="Nama penghuni (opsional)"
+                placeholder={
+                  form.kategori === "Pengeluaran"
+                    ? "Nama penerima / kepada (opsional)"
+                    : "Nama penghuni (opsional)"
+                }
               />
             </div>
             <div>
@@ -2268,7 +2296,8 @@ export default function FinancePageClient({
           </p>
           {hoverKeterangan.namaPenghuni ? (
             <p className="mt-1 text-[11px] font-medium text-[#5e462e] dark:text-[#d8be99]">
-              Penghuni: {hoverKeterangan.namaPenghuni}
+              {hoverKeterangan.kategori === "Pengeluaran" ? "Kepada" : "Penghuni"}:{" "}
+              {hoverKeterangan.namaPenghuni}
             </p>
           ) : null}
           <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap">{hoverKeterangan.text}</p>
