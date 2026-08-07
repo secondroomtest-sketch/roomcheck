@@ -22,7 +22,7 @@ export default function RefreshToolbarButton({
       disabled={disabled}
       onClick={() => void onRefresh()}
       aria-label={label === "Refresh" ? "Muat ulang data" : label}
-      className={`group relative z-[5] inline-flex items-center gap-2 rounded-full border border-[#c8d3ff] bg-[#f6f8ff] px-4 py-2 text-xs font-semibold tracking-[0.12em] text-[#3f4f9d] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#9aaeff] hover:bg-[#eaf0ff] hover:text-[#2a3776] hover:shadow-md active:translate-y-0 disabled:pointer-events-none disabled:opacity-60 dark:border-[#3c4270] dark:bg-[#1a1f3a] dark:text-[#b9c7ff] dark:hover:border-[#697bc8] dark:hover:bg-[#232a4d] dark:hover:text-[#e2e8ff] ${className}`.trim()}
+      className={`btn-tactile btn-tactile-soft group relative z-[5] inline-flex items-center gap-2 rounded-full border border-[#c8d3ff] bg-[#f6f8ff] px-4 py-2 text-xs font-semibold tracking-[0.12em] text-[#3f4f9d] transition-colors duration-200 hover:border-[#9aaeff] hover:bg-[#eaf0ff] hover:text-[#2a3776] disabled:pointer-events-none disabled:opacity-60 dark:border-[#3c4270] dark:bg-[#1a1f3a] dark:text-[#b9c7ff] dark:hover:border-[#697bc8] dark:hover:bg-[#232a4d] dark:hover:text-[#e2e8ff] ${className}`.trim()}
     >
       <RefreshCcw
         size={14}

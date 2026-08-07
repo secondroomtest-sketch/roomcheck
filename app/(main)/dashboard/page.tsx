@@ -1155,7 +1155,7 @@ export default function DashboardPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    className="touch-manipulation inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c4a574] bg-white text-base font-semibold text-[#5c4328] shadow-sm transition hover:bg-[#faf3e8] active:scale-95 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] dark:hover:bg-[#3d2e20] sm:h-9 sm:w-9"
+                    className="btn-tactile btn-tactile-soft touch-manipulation inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c4a574] bg-white text-base font-semibold text-[#5c4328] shadow-sm transition hover:bg-[#faf3e8] active:scale-95 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] dark:hover:bg-[#3d2e20] sm:h-9 sm:w-9"
                     aria-label="Bulan sebelumnya"
                     onClick={() => setOwnerPnlMonth((m) => addCalendarMonthsYm(m, -1))}
                   >
@@ -1169,7 +1169,7 @@ export default function DashboardPage() {
                   />
                   <button
                     type="button"
-                    className="touch-manipulation inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c4a574] bg-white text-base font-semibold text-[#5c4328] shadow-sm transition hover:bg-[#faf3e8] active:scale-95 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] dark:hover:bg-[#3d2e20] sm:h-9 sm:w-9"
+                    className="btn-tactile btn-tactile-soft touch-manipulation inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c4a574] bg-white text-base font-semibold text-[#5c4328] shadow-sm transition hover:bg-[#faf3e8] active:scale-95 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] dark:hover:bg-[#3d2e20] sm:h-9 sm:w-9"
                     aria-label="Bulan berikutnya"
                     onClick={() => setOwnerPnlMonth((m) => addCalendarMonthsYm(m, 1))}
                   >

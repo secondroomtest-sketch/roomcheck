@@ -8,6 +8,8 @@ type ActionButtonWithIconProps = {
   disabled?: boolean;
   className?: string;
   iconClassName?: string;
+  /** Soft surface (outline/light) instead of solid fill. */
+  soft?: boolean;
 };
 
 export default function ActionButtonWithIcon({
@@ -18,13 +20,15 @@ export default function ActionButtonWithIcon({
   disabled = false,
   className = "",
   iconClassName = "",
+  soft = false,
 }: ActionButtonWithIconProps) {
+  const tactile = soft ? "btn-tactile btn-tactile-soft btn-tactile-sm" : "btn-tactile btn-tactile-sm";
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center gap-2 ${className}`.trim()}
+      className={`${tactile} inline-flex items-center gap-2 ${className}`.trim()}
     >
       <Icon size={14} className={iconClassName} />
       {label}

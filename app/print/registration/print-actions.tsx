@@ -57,10 +57,10 @@ export default function PrintActions() {
 
   return (
     <div className="toolbar no-print">
-      <button type="button" className="actionBtn" onClick={handlePrint}>
+      <button type="button" className="btn-tactile actionBtn" onClick={handlePrint}>
         Print
       </button>
-      <button type="button" className="actionBtn primary" onClick={handleDownloadPdf} disabled={isDownloading}>
+      <button type="button" className="btn-tactile actionBtn primary" onClick={handleDownloadPdf} disabled={isDownloading}>
         {isDownloading ? "Memproses PDF..." : "Download PDF"}
       </button>
     </div>

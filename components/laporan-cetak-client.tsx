@@ -166,7 +166,7 @@ export default function LaporanCetakClient() {
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[#2d2115] px-4 py-2 text-xs font-semibold text-[#f8ebd7]"
+              className="btn-tactile inline-flex items-center gap-1.5 rounded-full bg-[#2d2115] px-4 py-2 text-xs font-semibold text-[#f8ebd7]"
             >
               <Printer size={14} aria-hidden />
               Print / Simpan PDF
@@ -174,7 +174,7 @@ export default function LaporanCetakClient() {
             <button
               type="button"
               onClick={handleDownloadPdf}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#8f734f] bg-white px-4 py-2 text-xs font-semibold text-[#2d2115]"
+              className="btn-tactile btn-tactile-soft inline-flex items-center gap-1.5 rounded-full border border-[#8f734f] bg-white px-4 py-2 text-xs font-semibold text-[#2d2115]"
               title='Di dialog print, pilih "Save as PDF" / "Microsoft Print to PDF"'
             >
               <Download size={14} aria-hidden />
@@ -183,7 +183,7 @@ export default function LaporanCetakClient() {
             <button
               type="button"
               onClick={handleEmail}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#4d6dff] bg-white px-4 py-2 text-xs font-semibold text-[#2d3a8f]"
+              className="btn-tactile btn-tactile-soft inline-flex items-center gap-1.5 rounded-full border border-[#4d6dff] bg-white px-4 py-2 text-xs font-semibold text-[#2d3a8f]"
             >
               <Mail size={14} aria-hidden />
               Bagikan email

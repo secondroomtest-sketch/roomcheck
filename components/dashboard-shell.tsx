@@ -257,7 +257,7 @@ function DashboardShellInner({
           <div className="fixed inset-0 z-[90] lg:hidden" role="dialog" aria-modal="true">
             <button
               type="button"
-              className="absolute inset-0 bg-black/55"
+              className="btn-flat absolute inset-0 bg-black/55"
               aria-label="Tutup menu"
               onClick={() => setMobileNavOpen(false)}
             />
@@ -286,7 +286,7 @@ function DashboardShellInner({
                 <button
                   type="button"
                   onClick={() => setMobileNavOpen(false)}
-                  className={`rounded-full p-1.5 ${isDark ? "text-[#cbd6ff] hover:bg-[#23294f]" : "text-[#3f4f9d] hover:bg-[#e9eeff]"}`}
+                  className={`btn-tactile btn-tactile-soft rounded-full p-1.5 ${isDark ? "text-[#cbd6ff] hover:bg-[#23294f]" : "text-[#3f4f9d] hover:bg-[#e9eeff]"}`}
                   aria-label="Tutup menu navigasi"
                 >
                   <X size={18} />
@@ -360,7 +360,7 @@ function DashboardShellInner({
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
-              className={`safe-fab-bl fixed z-[85] inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-lg lg:hidden ${
+              className={`btn-tactile btn-tactile-soft safe-fab-bl fixed z-[85] inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] lg:hidden ${
                 isDark
                   ? "border-[#4b5894] bg-[#202a52] text-[#d6e0ff]"
                   : "border-[#c6d2ff] bg-white text-[#4457a8]"
@@ -386,7 +386,7 @@ function DashboardShellInner({
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
-                className={`mb-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] lg:hidden ${
+                className={`btn-tactile btn-tactile-soft mb-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] lg:hidden ${
                   isDark
                     ? "border-[#3e477c] bg-[#1f2546] text-[#b8c6ff]"
                     : "border-[#d3dbff] bg-[#f8f9ff] text-[#4a5ba4]"
@@ -428,7 +428,7 @@ function DashboardShellInner({
                       }
                     })();
                   }}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] transition sm:text-[11px] disabled:pointer-events-none disabled:opacity-60 ${
+                  className={`btn-tactile btn-tactile-soft inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] transition sm:text-[11px] disabled:pointer-events-none disabled:opacity-60 ${
                     isDark
                       ? "border-[#5560a8] bg-[#232c58] text-[#d8e0ff] hover:bg-[#2c3770]"
                       : "border-[#b8c4ff] bg-white text-[#4a54a8] hover:bg-[#eef1ff]"
@@ -451,7 +451,7 @@ function DashboardShellInner({
                 <button
                   type="button"
                   onClick={() => setProfileMenuOpen((prev) => !prev)}
-                  className={`flex items-center gap-3 text-left ${
+                  className={`btn-tactile btn-tactile-soft flex items-center gap-3 text-left ${
                     isDark ? "text-[#eef2ff]" : "text-[#1f1b42]"
                   }`}
                 >
@@ -488,7 +488,7 @@ function DashboardShellInner({
                     <button
                       type="button"
                       onClick={handleLogout}
-                      className={`mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm ${
+                      className={`btn-tactile mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm ${
                         isDark
                           ? "text-[#f2c9ff] hover:bg-[#262d52]"
                           : "text-[#7d3cff] hover:bg-[#eff3ff]"

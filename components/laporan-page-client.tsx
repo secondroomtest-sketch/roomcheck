@@ -837,14 +837,14 @@ export default function LaporanPageClient({
             type="button"
             onClick={handleApplyDateFilter}
             disabled={draftDateRangeInvalid || filterApplyBusy}
-            className="min-h-[46px] w-full rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 text-[12px] font-semibold uppercase tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-0 sm:w-auto sm:rounded-full sm:py-2.5 sm:text-xs sm:tracking-[0.12em]"
+            className="btn-tactile min-h-[46px] w-full rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 text-[12px] font-semibold uppercase tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-0 sm:w-auto sm:rounded-full sm:py-2.5 sm:text-xs sm:tracking-[0.12em]"
           >
             {filterApplyBusy ? "Memuat…" : "Tampilkan"}
           </button>
           <button
             type="button"
             onClick={handleResetFullDateRange}
-            className="min-h-[46px] w-full rounded-xl border border-[#b8c4ff] bg-white px-4 text-[12px] font-semibold uppercase tracking-[0.1em] text-[#4a54a8] transition active:bg-[#eef1ff] sm:min-h-0 sm:w-auto sm:rounded-full sm:py-2 sm:text-xs sm:tracking-[0.12em] dark:border-[#5560a8] dark:bg-[#232c58] dark:text-[#d8e0ff] dark:hover:bg-[#2c3770] dark:active:bg-[#323d70]"
+            className="btn-tactile btn-tactile-soft min-h-[46px] w-full rounded-xl border border-[#b8c4ff] bg-white px-4 text-[12px] font-semibold uppercase tracking-[0.1em] text-[#4a54a8] transition active:bg-[#eef1ff] sm:min-h-0 sm:w-auto sm:rounded-full sm:py-2 sm:text-xs sm:tracking-[0.12em] dark:border-[#5560a8] dark:bg-[#232c58] dark:text-[#d8e0ff] dark:hover:bg-[#2c3770] dark:active:bg-[#323d70]"
           >
             Reset ke seluruh tanggal
           </button>
@@ -1144,7 +1144,7 @@ export default function LaporanPageClient({
         type="button"
         onClick={handleOpenLaporanChoice}
         disabled={openingReport}
-        className="flex min-h-[50px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 py-3.5 text-[13px] font-semibold tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-70 sm:inline-flex sm:min-h-0 sm:w-auto sm:rounded-full sm:px-8 sm:py-3 sm:text-sm sm:tracking-[0.14em]"
+        className="btn-tactile flex min-h-[50px] w-full touch-manipulation items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 py-3.5 text-[13px] font-semibold tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-70 sm:inline-flex sm:min-h-0 sm:w-auto sm:rounded-full sm:px-8 sm:py-3 sm:text-sm sm:tracking-[0.14em]"
       >
         <FileText size={17} strokeWidth={1.9} className={`shrink-0 ${iconTone.info}`} aria-hidden />
         {openingReport ? "Membuka…" : "Buka laporan lengkap (tab baru)"}

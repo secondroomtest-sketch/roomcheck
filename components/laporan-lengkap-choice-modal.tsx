@@ -20,7 +20,7 @@ export default function LaporanLengkapChoiceModal({
     <div className="fixed inset-0 z-[420] flex items-end justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:items-center sm:p-6">
       <button
         type="button"
-        className="absolute inset-0 cursor-default bg-[#121327]/50 backdrop-blur-[2px]"
+        className="btn-tactile absolute inset-0 cursor-default bg-[#121327]/50 backdrop-blur-[2px]"
         aria-label="Tutup dialog jenis laporan"
         disabled={busy}
         onClick={onClose}
@@ -48,7 +48,7 @@ export default function LaporanLengkapChoiceModal({
             type="button"
             disabled={busy}
             onClick={onClose}
-            className="shrink-0 rounded-full border border-transparent p-2 text-[#5261aa] hover:border-[#c9d6ff] hover:bg-[#eef2ff] disabled:opacity-60 dark:text-[#b8c7ff]"
+            className="btn-tactile btn-tactile-soft shrink-0 rounded-full border border-transparent p-2 text-[#5261aa] hover:border-[#c9d6ff] hover:bg-[#eef2ff] disabled:opacity-60 dark:text-[#b8c7ff]"
             aria-label="Tutup"
           >
             <X size={18} aria-hidden />

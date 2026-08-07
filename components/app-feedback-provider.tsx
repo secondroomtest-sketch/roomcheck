@@ -118,7 +118,7 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
               <button
                 type="button"
                 onClick={() => dismissToast(t.id)}
-                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
+                className="btn-flat shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
                 aria-label="Tutup notifikasi"
               >
                 <X className="h-4 w-4" />
@@ -143,7 +143,7 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
               <button
                 type="button"
                 onClick={() => dismissToast(t.id)}
-                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
+                className="btn-flat shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
                 aria-label="Tutup notifikasi"
               >
                 <X className="h-4 w-4" />
@@ -168,7 +168,7 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
               <button
                 type="button"
                 onClick={() => dismissToast(t.id)}
-                className="shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
+                className="btn-flat shrink-0 rounded-lg p-1 opacity-70 hover:opacity-100"
                 aria-label="Tutup notifikasi"
               >
                 <X className="h-4 w-4" />
@@ -187,7 +187,7 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
         >
           <button
             type="button"
-            className="absolute inset-0 cursor-default"
+            className="btn-flat absolute inset-0 cursor-default"
             aria-label="Tutup dialog"
             onClick={() => finishConfirm(false)}
           />
@@ -220,14 +220,14 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
               <button
                 type="button"
                 onClick={() => finishConfirm(false)}
-                className="rounded-full border border-[#d5be9e] px-4 py-2 text-sm font-semibold text-[#6d5232] transition hover:bg-[#f3e6d2] dark:border-[#4f3b2a] dark:text-[#d9bb94] dark:hover:bg-[#2f2419]"
+                className="btn-tactile btn-tactile-soft rounded-full border border-[#d5be9e] px-4 py-2 text-sm font-semibold text-[#6d5232] transition hover:bg-[#f3e6d2] dark:border-[#4f3b2a] dark:text-[#d9bb94] dark:hover:bg-[#2f2419]"
               >
                 {confirmState.cancelLabel ?? "Batal"}
               </button>
               <button
                 type="button"
                 onClick={() => finishConfirm(true)}
-                className={`rounded-full px-4 py-2 text-sm font-semibold text-white transition ${
+                className={`btn-tactile rounded-full px-4 py-2 text-sm font-semibold text-white transition ${
                   confirmState.destructive
                     ? "bg-red-600 hover:bg-red-700"
                     : "bg-[#5c4330] hover:bg-[#3d2918]"

@@ -289,7 +289,7 @@ export default function MasterPageClient({
   }, [localDemoMode, initialFinanceKategori, initialLokasi, initialBlok, initialUsers]);
 
   const tabBtnClass = (tab: MasterTab) =>
-    `w-full rounded-full px-4 py-2.5 text-left text-[0.65rem] font-semibold tracking-[0.1em] transition sm:inline-block sm:w-auto sm:py-2 sm:text-center sm:text-xs sm:tracking-[0.14em] ${
+    `btn-tactile btn-tactile-soft w-full rounded-full px-4 py-2.5 text-left text-[0.65rem] font-semibold tracking-[0.1em] transition sm:inline-block sm:w-auto sm:py-2 sm:text-center sm:text-xs sm:tracking-[0.14em] ${
       activeTab === tab
         ? "bg-gradient-to-r from-[#60482f] to-[#8f734f] text-[#f8ebd7]"
         : "bg-[#f2e4d0] text-[#6b5236] hover:bg-[#e8d6be] dark:bg-[#2c2117] dark:text-[#d7bb95] dark:hover:bg-[#3a2c1f]"

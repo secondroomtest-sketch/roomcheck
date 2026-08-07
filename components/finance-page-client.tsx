@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "@/libsupabaseClient";
-import { Ban, FileText, HandCoins, Plus, ReceiptText, Save, X } from "lucide-react";
+import { Ban, FileText, HandCoins, Plus, ReceiptText, Save, Search, X } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
@@ -44,6 +44,7 @@ import {
   normalizeNotaKey,
   sanitizeSrNotaDigits,
   srNotaDigitsInvalidMessage,
+  suggestNextSrNotaDigits,
   SR_NOTA_MAX_DIGITS,
 } from "@/lib/finance-nota-validation";
 import { readDemoProfileSession } from "@/lib/demo-auth";
@@ -251,7 +252,25 @@ function FinanceRiwayatTableBlock({
   /** Warna nominal total footer: pemasukan (hijau) vs pengeluaran (merah muda). */
   footerSumTone?: "income" | "expense";
 }) {
-  const sumNominal = sumNominalRows(rows);
+  const [notaQuery, setNotaQuery] = useState("");
+
+  const visibleRows = useMemo(() => {
+    const q = normalizeNotaKey(notaQuery);
+    if (!q) return rows;
+    const qDigits = q.replace(/^sr/, "");
+    return rows.filter((row) => {
+      const nota = normalizeNotaKey(row.noNota);
+      if (!nota) return false;
+      if (nota.includes(q)) return true;
+      const notaDigits = nota.replace(/^sr/, "");
+      return Boolean(qDigits) && notaDigits.includes(qDigits);
+    });
+  }, [notaQuery, rows]);
+
+  const sumNominal = sumNominalRows(visibleRows);
+  const emptyMessage = notaQuery.trim()
+    ? `Tidak ada nota yang cocok dengan "${notaQuery.trim()}".`
+    : "Belum ada data untuk filter ini.";
 
   const handleRowOpenInvoice = (row: FinanceRow, e: MouseEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -329,18 +348,53 @@ function FinanceRiwayatTableBlock({
         {hint ? (
           <p className="mt-1.5 text-[11px] leading-relaxed text-[#7f6344] sm:text-xs dark:text-[#b79a78]">{hint}</p>
         ) : null}
+        <div className="mt-3">
+          <label className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8f724d] dark:text-[#c8a97f]">
+            Cari No. Nota
+          </label>
+          <div className="relative mt-1">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#9d7e55] dark:text-[#b79a78]"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={notaQuery}
+              onChange={(e) => setNotaQuery(e.target.value)}
+              placeholder="Contoh: SR0026 atau 0026"
+              autoComplete="off"
+              className="w-full min-h-[2.5rem] rounded-xl border border-[#dcc7aa] bg-[#fffdf9] py-2 pl-9 pr-9 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016] dark:text-[#f6e9d5]"
+            />
+            {notaQuery ? (
+              <button
+                type="button"
+                onClick={() => setNotaQuery("")}
+                className="btn-flat absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-[#8f724d] hover:bg-[#efe2d1] dark:text-[#c8a97f] dark:hover:bg-[#33261b]"
+                aria-label="Hapus pencarian nota"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+          {!isLoading && notaQuery.trim() ? (
+            <p className="mt-1.5 text-[11px] text-[#7f6344] dark:text-[#b79a78]">
+              Menampilkan {visibleRows.length} dari {rows.length} baris
+            </p>
+          ) : null}
+        </div>
         <div className="mt-3 space-y-3 md:hidden">
         {isLoading ? (
           <div className="rounded-2xl border border-[#eadcc9] bg-[#fffdf9] px-4 py-4 text-sm text-[#856948] dark:border-[#3d2f22] dark:bg-[#2b2016] dark:text-[#bca17f]">
             Memuat data finance...
           </div>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <div className="rounded-2xl border border-[#eadcc9] bg-[#fffdf9] px-4 py-4 text-sm text-[#856948] dark:border-[#3d2f22] dark:bg-[#2b2016] dark:text-[#bca17f]">
-            Belum ada data untuk filter ini.
+            {emptyMessage}
           </div>
         ) : (
           <>
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <article
                 key={row.id}
                 className={`rounded-2xl border border-[#eadcc9] bg-[#fffdf9] p-4 shadow-sm dark:border-[#3d2f22] dark:bg-[#2b2016] ${
@@ -435,14 +489,14 @@ function FinanceRiwayatTableBlock({
                   Memuat data finance...
                 </td>
               </tr>
-            ) : rows.length === 0 ? (
+            ) : visibleRows.length === 0 ? (
               <tr>
                 <td className="px-3 py-3 text-sm text-[#856948] dark:text-[#bca17f]" colSpan={7}>
-                  Belum ada data untuk filter ini.
+                  {emptyMessage}
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              visibleRows.map((row) => (
                 <tr
                   key={row.id}
                   className={`border-t border-[#efe2d1] dark:border-[#33261b] ${
@@ -466,7 +520,7 @@ function FinanceRiwayatTableBlock({
               ))
             )}
           </tbody>
-          {!isLoading && rows.length > 0 ? (
+          {!isLoading && visibleRows.length > 0 ? (
             <tfoot className="border-t-2 border-[#d4bc9a] bg-[#f0e4d4] dark:border-[#5c452d] dark:bg-[#2a1f16]">
               <tr className="text-xs font-semibold uppercase tracking-[0.1em] text-[#4a3624] dark:text-[#e8d4bc]">
                 <td className="px-3 py-2.5 text-right md:text-right" colSpan={5}>
@@ -1123,10 +1177,11 @@ export default function FinancePageClient({
 
   const resetForm = () => {
     const lokasiAwal = formLokasiOptions[0] ?? "";
-    setFinanceNotaDigits("");
+    const nextNotaDigits = suggestNextSrNotaDigits(financeData);
+    setFinanceNotaDigits(nextNotaDigits);
     setPengeluaranScopeFilter("kos");
     setForm({
-      noNota: "",
+      noNota: formatSrNotaFromDigits(nextNotaDigits),
       kategori: "Pemasukan",
       pos: getDefaultPosForKategori("Pemasukan"),
       tanggal: new Date().toISOString().slice(0, 10),
@@ -1640,7 +1695,7 @@ export default function FinancePageClient({
               type="button"
               onClick={handleOpenLaporanFromFinance}
               disabled={isLoading || laporanPrepBusy || financeAppliedDateInvalid}
-              className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-[#c9b89a] bg-[#fffdf9] px-3 py-2.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-[0.06em] text-[#5c4828] shadow-sm transition hover:bg-[#f5ede0] disabled:cursor-not-allowed disabled:opacity-55 dark:border-[#55442e] dark:bg-[#2a2218] dark:text-[#dfc9a8] dark:hover:bg-[#352a1c] sm:min-h-0 sm:flex-initial sm:rounded-full sm:py-2 sm:text-[11px]"
+              className="btn-tactile btn-tactile-soft inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-[#c9b89a] bg-[#fffdf9] px-3 py-2.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-[0.06em] text-[#5c4828] shadow-sm transition hover:bg-[#f5ede0] disabled:cursor-not-allowed disabled:opacity-55 dark:border-[#55442e] dark:bg-[#2a2218] dark:text-[#dfc9a8] dark:hover:bg-[#352a1c] sm:min-h-0 sm:flex-initial sm:rounded-full sm:py-2 sm:text-[11px]"
               title="Buka tab laporan cetak dengan filter lokasi/unit &amp; tanggal yang dipakai di bawah ini"
             >
               <FileText size={14} className="shrink-0" aria-hidden />
@@ -1769,14 +1824,14 @@ export default function FinancePageClient({
                   type="button"
                   onClick={handleApplyRiwayatDates}
                   disabled={financeDraftDateInvalid || filterRiwayatBusy}
-                  className="inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55 sm:min-w-[8.5rem] sm:flex-none sm:rounded-full xl:flex-initial"
+                  className="btn-tactile inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55 sm:min-w-[8.5rem] sm:flex-none sm:rounded-full xl:flex-initial"
                 >
                   {filterRiwayatBusy ? "Memuat…" : "Tampilkan"}
                 </button>
                 <button
                   type="button"
                   onClick={handleResetRiwayatDates}
-                  className="inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl border border-[#d5be9e] bg-white/90 px-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6d5232] transition hover:bg-[#faf5ef] dark:border-[#4f3b2a] dark:bg-[#2f2419] dark:text-[#d9bb94] dark:hover:bg-[#3d2f22] sm:flex-none sm:rounded-full xl:flex-initial"
+                  className="btn-tactile btn-tactile-soft inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl border border-[#d5be9e] bg-white/90 px-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6d5232] transition hover:bg-[#faf5ef] dark:border-[#4f3b2a] dark:bg-[#2f2419] dark:text-[#d9bb94] dark:hover:bg-[#3d2f22] sm:flex-none sm:rounded-full xl:flex-initial"
                 >
                   Reset semua tanggal
                 </button>
@@ -1924,7 +1979,7 @@ export default function FinancePageClient({
         <>
           <button
             type="button"
-            className="fixed inset-0 z-[200] cursor-default bg-black/45 backdrop-blur-[1px]"
+            className="btn-flat fixed inset-0 z-[200] cursor-default bg-black/45 backdrop-blur-[1px]"
             aria-label="Tutup panel input payment"
             onClick={() => {
               resetForm();
@@ -1980,9 +2035,11 @@ export default function FinancePageClient({
                     {" "}
                     · Terakhir dipakai:{" "}
                     <span className="font-semibold text-[#5c4330] dark:text-[#e8dcc8]">{lastUsedSrNota}</span>
+                    {" "}
+                    · Otomatis diisi nomor berikutnya (bisa diubah).
                   </>
                 ) : (
-                  <> · Belum ada nomor nota sebelumnya.</>
+                  <> · Belum ada nomor nota sebelumnya · Otomatis diisi SR0001 (bisa diubah).</>
                 )}
               </p>
               <div

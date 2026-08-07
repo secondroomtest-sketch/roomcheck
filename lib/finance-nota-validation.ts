@@ -103,3 +103,31 @@ export function findLastUsedSrNota(rows: LastUsedSrNotaRow[]): string | null {
   }
   return bestFormatted || null;
 }
+
+const SR_NOTA_MAX_VALUE = 10 ** SR_NOTA_MAX_DIGITS - 1;
+
+/**
+ * Digit berikutnya setelah nota terakhir (tanpa prefiks SR).
+ * Contoh: SR0026 → "0027". Jika belum ada → "0001".
+ */
+export function suggestNextSrNotaDigitsFromLast(lastUsed: string | null | undefined): string {
+  const raw = String(lastUsed ?? "").trim();
+  if (!raw || !/^sr/i.test(raw)) {
+    return "0001";
+  }
+  const digits = sanitizeSrNotaDigits(raw.replace(/^sr/i, ""));
+  if (!digits) return "0001";
+  const current = Number.parseInt(digits, 10);
+  if (!Number.isFinite(current) || current < 0) return "0001";
+  const next = current + 1;
+  if (next > SR_NOTA_MAX_VALUE) {
+    return String(SR_NOTA_MAX_VALUE).padStart(SR_NOTA_MAX_DIGITS, "0");
+  }
+  const width = Math.min(SR_NOTA_MAX_DIGITS, Math.max(digits.length, 1));
+  return String(next).padStart(width, "0");
+}
+
+/** Digit no. nota berikutnya dari daftar baris finance. */
+export function suggestNextSrNotaDigits(rows: LastUsedSrNotaRow[]): string {
+  return suggestNextSrNotaDigitsFromLast(findLastUsedSrNota(rows));
+}

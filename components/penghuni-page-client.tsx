@@ -47,6 +47,8 @@ import {
   normalizeNotaKey,
   sanitizeSrNotaDigits,
   srNotaDigitsInvalidMessage,
+  suggestNextSrNotaDigits,
+  suggestNextSrNotaDigitsFromLast,
   SR_NOTA_MAX_DIGITS,
 } from "@/lib/finance-nota-validation";
 import { buildSewaSplitCalendarMonthStarts, splitNominalRupiahEqualParts } from "@/lib/finance-sewa-split";
@@ -317,6 +319,8 @@ export default function PenghuniPageClient({
   const [sewaPaymentNominal, setSewaPaymentNominal] = useState("");
   /** Hanya angka setelah prefiks tetap SR (no. nota sewa = SR + angka). */
   const [sewaPaymentNotaDigits, setSewaPaymentNotaDigits] = useState("");
+  /** Tanggal pembayaran sewa (YYYY-MM-DD), default hari ini. */
+  const [sewaPaymentTanggal, setSewaPaymentTanggal] = useState(() => new Date().toISOString().slice(0, 10));
   const [showExtendStayPanel, setShowExtendStayPanel] = useState(false);
   const [extendStayPeriodeBulan, setExtendStayPeriodeBulan] = useState("1");
   const [extendStayCheckOut, setExtendStayCheckOut] = useState("");
@@ -1744,7 +1748,11 @@ export default function PenghuniPageClient({
       }
     }
     setSewaPaymentNominal(formatRupiahInput(String(h * bulan)));
-    setSewaPaymentNotaDigits("");
+    const nextNotaDigits = localDemoMode
+      ? suggestNextSrNotaDigits(readSandboxJson<FinanceRow[]>(SB_KEY.finance, []))
+      : suggestNextSrNotaDigitsFromLast(lastUsedSrNota);
+    setSewaPaymentNotaDigits(nextNotaDigits);
+    setSewaPaymentTanggal(new Date().toISOString().slice(0, 10));
     setShowDepositPaymentPanel(false);
     setShowSewaPaymentPanel(true);
   };
@@ -1752,7 +1760,10 @@ export default function PenghuniPageClient({
   const openDepositPaymentPanel = () => {
     if (!penghuniProfileRow) return;
     setDepositPaymentNominal(formatRupiahInput(penghuniProfileRow.bookingFee || ""));
-    setDepositPaymentNotaDigits("");
+    const nextNotaDigits = localDemoMode
+      ? suggestNextSrNotaDigits(readSandboxJson<FinanceRow[]>(SB_KEY.finance, []))
+      : suggestNextSrNotaDigitsFromLast(lastUsedSrNota);
+    setDepositPaymentNotaDigits(nextNotaDigits);
     setShowSewaPaymentPanel(false);
     setShowDepositPaymentPanel(true);
   };
@@ -1831,7 +1842,11 @@ export default function PenghuniPageClient({
       }
     }
 
-    const paymentDate = new Date().toISOString().slice(0, 10);
+    const paymentDate = String(sewaPaymentTanggal ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+      toast("Isi tanggal payment yang valid.", "error");
+      return;
+    }
     const monthStarts = buildSewaSplitCalendarMonthStarts(activeCycleStart, bulan, paymentDate);
     if (monthStarts.length !== bulan) {
       toast("Tidak dapat membuat alokasi bulan P&L. Periksa tanggal check-in penghuni.", "error");
@@ -1900,7 +1915,7 @@ export default function PenghuniPageClient({
           noNota,
           kategori: "Pemasukan" as const,
           pos: FINANCE_POS_SEWA_KAMAR,
-          tanggal: pel,
+          tanggal: paymentDate,
           namaPenghuni: row.namaLengkap,
           lokasiKos: row.lokasiKos,
           unitBlok: row.unitBlok,
@@ -1922,12 +1937,13 @@ export default function PenghuniPageClient({
           no_nota: noNota,
           kategori: "Pemasukan" as const,
           pos: FINANCE_POS_SEWA_KAMAR,
-          tanggal: pel,
+          tanggal: paymentDate,
           nama_penghuni: row.namaLengkap,
           nominal: nominalParts[idx] ?? 0,
           keterangan: keteranganFin,
           lokasi_kos: row.lokasiKos,
           unit_blok: row.unitBlok,
+          pelaporan_bulan: pel,
         };
       });
       const { error: finErr } = await supabase.from("finance").insert(inserts);
@@ -2176,7 +2192,7 @@ export default function PenghuniPageClient({
               <button
                 type="button"
                 onClick={togglePenghuniBaru}
-                className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
+                className={`btn-tactile btn-tactile-soft rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
                   showPenghuniForm
                     ? "border-[#4a3624] bg-[#5c4330] text-[#fff8eb] ring-2 ring-[#c09c70]/50 dark:border-[#c9a574] dark:bg-[#3d2d1f] dark:text-[#f0dcc4]"
                     : "border-[#a67c48] bg-[#c49a6a] text-white hover:border-[#3d2a18] hover:bg-[#3d2918] hover:text-[#fff8eb] dark:border-[#7a5c3a] dark:bg-[#5c452d] dark:text-[#f5e8d4] dark:hover:border-[#2a1810] dark:hover:bg-[#1f140e]"
@@ -2428,7 +2444,7 @@ export default function PenghuniPageClient({
             <button
               type="button"
               onClick={toggleSurveyBaru}
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
+              className={`btn-tactile rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
                 showSurveyForm
                   ? "border-amber-800 bg-amber-900 text-amber-50 ring-2 ring-amber-500/40 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-100"
                   : "border-amber-600 bg-amber-500 text-amber-950 hover:border-amber-900 hover:bg-amber-800 hover:text-amber-50 dark:border-amber-500 dark:bg-amber-600 dark:text-amber-950 dark:hover:border-amber-300 dark:hover:bg-amber-800 dark:hover:text-amber-50"
@@ -2548,7 +2564,7 @@ export default function PenghuniPageClient({
         <button
           type="button"
           aria-label="Tutup profil"
-          className="absolute inset-0 bg-black/55 transition hover:bg-black/65"
+          className="btn-flat absolute inset-0 bg-black/55 transition hover:bg-black/65"
           onClick={() => {
             setShowSewaPaymentPanel(false);
             setShowExtendStayPanel(false);
@@ -2597,7 +2613,7 @@ export default function PenghuniPageClient({
                       <button
                         type="button"
                         onClick={openExtendStayPanel}
-                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-100 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+                        className="btn-tactile inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-100 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
                       >
                         Extend stay
                       </button>
@@ -2745,7 +2761,7 @@ export default function PenghuniPageClient({
                       parseRupiahToNumber(penghuniProfileRow.bookingFee) <= 0
                     }
                     onClick={openDepositPaymentPanel}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Wallet size={18} aria-hidden />
                     Payment Booking
@@ -2758,7 +2774,7 @@ export default function PenghuniPageClient({
                       Math.max(0, Math.floor(Number(penghuniProfileRow.periodeSewa) || 0)) <= 0
                     }
                     onClick={openSewaPaymentPanel}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <CreditCard size={18} aria-hidden />
                     Payment sewa kamar
@@ -2770,7 +2786,7 @@ export default function PenghuniPageClient({
                     type="button"
                     disabled={Boolean(penghuniProfileRow.sewaKamarPaid)}
                     onClick={openSewaPaymentPanel}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <CreditCard size={18} aria-hidden />
                     Payment sewa kamar
@@ -2782,7 +2798,7 @@ export default function PenghuniPageClient({
                       parseRupiahToNumber(penghuniProfileRow.bookingFee) <= 0
                     }
                     onClick={openDepositPaymentPanel}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Wallet size={18} aria-hidden />
                     Payment deposit kamar
@@ -2817,7 +2833,7 @@ export default function PenghuniPageClient({
       >
         <button
           type="button"
-          className="min-h-0 min-w-0 flex-1 bg-black/40 transition hover:bg-black/50"
+          className="btn-flat min-h-0 min-w-0 flex-1 bg-black/40 transition hover:bg-black/50"
           aria-label="Tutup panel pembayaran"
           onClick={() => setShowSewaPaymentPanel(false)}
         />
@@ -2876,7 +2892,7 @@ export default function PenghuniPageClient({
                 <span className="font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
                   {lastUsedSrNota ?? "Belum ada"}
                 </span>
-                .
+                . Otomatis diisi nomor berikutnya (bisa diubah).
               </p>
               <div
                 className={`mt-1 flex w-full items-center overflow-hidden rounded-xl border bg-white text-[#2c2218] outline-none dark:bg-[#1f1710] dark:text-[#f5e8d4] ${
@@ -2917,6 +2933,18 @@ export default function PenghuniPageClient({
                   {paymentNotaConflictMessage}
                 </p>
               ) : null}
+            </label>
+            <label className="block text-sm">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                Tanggal payment <span className="text-red-600 dark:text-red-400">*</span>
+              </span>
+              <input
+                type="date"
+                required
+                value={sewaPaymentTanggal}
+                onChange={(e) => setSewaPaymentTanggal(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-[#d5be9e] bg-white px-3 py-2.5 text-[#2c2218] outline-none ring-emerald-500/30 focus:ring-2 dark:border-[#4f3b2a] dark:bg-[#1f1710] dark:text-[#f5e8d4]"
+              />
             </label>
             <label className="block text-sm">
               <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">Nominal (Rp)</span>
@@ -2968,7 +2996,7 @@ export default function PenghuniPageClient({
       >
         <button
           type="button"
-          className="min-h-0 min-w-0 flex-1 bg-black/40 transition hover:bg-black/50"
+          className="btn-flat min-h-0 min-w-0 flex-1 bg-black/40 transition hover:bg-black/50"
           aria-label="Tutup panel extend stay"
           onClick={() => setShowExtendStayPanel(false)}
         />
@@ -3062,7 +3090,7 @@ export default function PenghuniPageClient({
       >
         <button
           type="button"
-          className="min-h-0 min-w-0 flex-1 bg-black/40 transition hover:bg-black/50"
+          className="btn-flat min-h-0 min-w-0 flex-1 bg-black/40 transition hover:bg-black/50"
           aria-label="Tutup panel pembayaran deposit"
           onClick={() => setShowDepositPaymentPanel(false)}
         />
@@ -3121,7 +3149,7 @@ export default function PenghuniPageClient({
                 <span className="font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
                   {lastUsedSrNota ?? "Belum ada"}
                 </span>
-                .
+                . Otomatis diisi nomor berikutnya (bisa diubah).
               </p>
               <div
                 className={`mt-1 flex w-full items-center overflow-hidden rounded-xl border bg-white text-[#2c2218] outline-none dark:bg-[#1f1710] dark:text-[#f5e8d4] ${
@@ -3227,7 +3255,7 @@ export default function PenghuniPageClient({
         <button
           type="button"
           aria-label="Tutup"
-          className="absolute inset-0 bg-black/50 transition hover:bg-black/60"
+          className="btn-flat absolute inset-0 bg-black/50 transition hover:bg-black/60"
           onClick={closePenghuniModal}
         />
         <div
@@ -3246,7 +3274,7 @@ export default function PenghuniPageClient({
             <button
               type="button"
               onClick={closePenghuniModal}
-              className="rounded-full p-2 text-[#6e5336] transition hover:bg-[#efe2d1] hover:text-[#2c2218] dark:text-[#d9bc95] dark:hover:bg-[#33261b]"
+              className="btn-tactile rounded-full p-2 text-[#6e5336] transition hover:bg-[#efe2d1] hover:text-[#2c2218] dark:text-[#d9bc95] dark:hover:bg-[#33261b]"
               aria-label="Tutup form"
             >
               <X size={20} />
@@ -3439,7 +3467,7 @@ export default function PenghuniPageClient({
         <button
           type="button"
           aria-label="Tutup"
-          className="absolute inset-0 bg-black/50 transition hover:bg-black/60"
+          className="btn-flat absolute inset-0 bg-black/50 transition hover:bg-black/60"
           onClick={closeSurveyModal}
         />
         <div
@@ -3458,7 +3486,7 @@ export default function PenghuniPageClient({
             <button
               type="button"
               onClick={closeSurveyModal}
-              className="rounded-full p-2 text-amber-900 transition hover:bg-amber-200/80 dark:text-amber-100 dark:hover:bg-amber-900/50"
+              className="btn-tactile rounded-full p-2 text-amber-900 transition hover:bg-amber-200/80 dark:text-amber-100 dark:hover:bg-amber-900/50"
               aria-label="Tutup form"
             >
               <X size={20} />

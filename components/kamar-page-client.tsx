@@ -751,7 +751,7 @@ export default function KamarPageClient({
             <button
               type="button"
               onClick={openTambahKamarPanel}
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#7f8fff] bg-[#6d32ff] px-3.5 py-0 text-[11px] font-semibold uppercase leading-none tracking-[0.1em] text-white shadow-sm transition hover:bg-[#3f4f9d] dark:border-[#8ea2ff] dark:bg-[#4d6dff] dark:hover:bg-[#6d32ff]"
+              className="btn-tactile inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#7f8fff] bg-[#6d32ff] px-3.5 py-0 text-[11px] font-semibold uppercase leading-none tracking-[0.1em] text-white shadow-sm transition hover:bg-[#3f4f9d] dark:border-[#8ea2ff] dark:bg-[#4d6dff] dark:hover:bg-[#6d32ff]"
             >
               <Plus size={14} className="shrink-0" aria-hidden />
               Tambah Kamar
@@ -994,7 +994,7 @@ export default function KamarPageClient({
         <>
           <button
             type="button"
-            className="fixed inset-0 z-[200] cursor-default bg-black/45 backdrop-blur-[1px]"
+            className="btn-flat fixed inset-0 z-[200] cursor-default bg-black/45 backdrop-blur-[1px]"
             aria-label="Tutup panel form kamar"
             onClick={closeKamarSidePanel}
           />
@@ -1026,7 +1026,7 @@ export default function KamarPageClient({
                 <button
                   type="button"
                   onClick={closeKamarSidePanel}
-                  className="rounded-full p-2 text-[#6e5336] transition hover:bg-[#efe2d1] dark:text-[#d9bc95] dark:hover:bg-[#33261b]"
+                  className="btn-tactile rounded-full p-2 text-[#6e5336] transition hover:bg-[#efe2d1] dark:text-[#d9bc95] dark:hover:bg-[#33261b]"
                   aria-label="Tutup form"
                 >
                   <X size={22} />

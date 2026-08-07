@@ -151,7 +151,7 @@ export default function LoginPage() {
           <div className="flex justify-end">
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-xs font-medium tracking-[0.15em] text-[#5d6fc0] underline decoration-[#9aaeff] underline-offset-4 transition hover:text-[#3f4f9d]"
+              className="btn-flat inline-flex items-center gap-1 text-xs font-medium tracking-[0.15em] text-[#5d6fc0] underline decoration-[#9aaeff] underline-offset-4 transition hover:text-[#3f4f9d]"
               aria-expanded={showForgotPanel}
               onClick={() => setShowForgotPanel((p) => !p)}
             >
@@ -169,7 +169,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={openPasswordRequestWhatsApp}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_-8px_rgba(37,211,102,0.65)] transition hover:bg-[#20bd5a] focus:outline-none focus:ring-2 focus:ring-[#128C7E] focus:ring-offset-2"
+                className="btn-tactile inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_-8px_rgba(37,211,102,0.65)] transition hover:bg-[#20bd5a] focus:outline-none focus:ring-2 focus:ring-[#128C7E] focus:ring-offset-2"
               >
                 <MessageCircle size={20} className="shrink-0" aria-hidden />
                 Request Password via WhatsApp
@@ -195,7 +195,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-full bg-gradient-to-r from-[#4d6dff] via-[#5e56ff] to-[#6d32ff] px-6 py-3 text-sm font-semibold tracking-[0.18em] text-[#eef3ff] shadow-[0_12px_35px_-15px_rgba(77,109,255,0.95)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            className="btn-tactile w-full rounded-full bg-gradient-to-r from-[#4d6dff] via-[#5e56ff] to-[#6d32ff] px-6 py-3 text-sm font-semibold tracking-[0.18em] text-[#eef3ff] shadow-[0_12px_35px_-15px_rgba(77,109,255,0.95)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isSubmitting ? "Memproses..." : "Lihat Kos Saya"}
           </button>

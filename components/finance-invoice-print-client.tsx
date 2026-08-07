@@ -138,13 +138,28 @@ export default function FinanceInvoicePrintClient() {
           font-size: 13px;
           font-weight: 600;
           cursor: pointer;
+          border-bottom-width: 3px;
+          box-shadow:
+            0 2px 0 rgba(15, 23, 42, 0.12),
+            0 5px 12px -7px rgba(15, 23, 42, 0.28),
+            inset 0 1px 0 rgba(255, 255, 255, 0.4);
+          transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease, border-bottom-width 140ms ease;
+        }
+        .actionBtn:hover:not(:disabled) {
+          transform: translateY(-1px);
+          filter: brightness(1.03);
+        }
+        .actionBtn:active:not(:disabled) {
+          transform: translateY(2px);
+          border-bottom-width: 1px;
+          box-shadow: inset 0 2px 5px rgba(15, 23, 42, 0.18);
         }
         .actionBtn.primary {
           background: linear-gradient(135deg, #5c3d99, #3d2568);
           border-color: #3d2568;
           color: #fff8eb;
         }
-        .actionBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .actionBtn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
         .sheet {
           width: 100%;
           max-width: 190mm;
