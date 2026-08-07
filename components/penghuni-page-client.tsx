@@ -371,6 +371,8 @@ export default function PenghuniPageClient({
     y: number;
   } | null>(null);
   const canManageSurvey = viewerRole === "super_admin" || viewerRole === "manager";
+  const canEditPenghuni = viewerRole === "super_admin" || viewerRole === "supervisor";
+  const canDeletePenghuni = viewerRole === "super_admin";
 
   const kamarSandboxRows = useMemo(() => {
     if (!localDemoMode || !sandboxReady) return [] as KamarRow[];
@@ -1552,6 +1554,10 @@ export default function PenghuniPageClient({
   };
 
   const deletePenghuniWithConfirm = async (row: PenghuniRow) => {
+    if (!canDeletePenghuni) {
+      toast("Role Anda tidak diizinkan menghapus data penghuni.", "error");
+      return;
+    }
     const ok = await confirm({
       title: "Hapus data penghuni?",
       message: `Anda akan menghapus "${row.namaLengkap}" (${row.lokasiKos} · ${row.unitBlok} / ${row.noKamar}). Tindakan ini tidak dapat dibatalkan di mode cloud.`,
@@ -2352,20 +2358,22 @@ export default function PenghuniPageClient({
             </div>
           </div>
 
-          <div className="mb-4 max-h-[min(320px,45vh)] overflow-y-auto rounded-2xl border border-[#eadcc9] dark:border-[#3d2f22]">
+          <div className="mb-4 max-h-[min(320px,45vh)] isolate overflow-y-auto rounded-2xl border border-[#eadcc9] dark:border-[#3d2f22]">
             <table className="min-w-full text-left text-sm">
-              <thead className="sticky top-0 bg-[#f8efe2] text-xs uppercase tracking-[0.12em] text-[#8f724d] dark:bg-[#2b2016] dark:text-[#c8a97f]">
+              <thead className="sticky top-0 z-30 text-xs uppercase tracking-[0.12em] text-[#8f724d] dark:text-[#c8a97f]">
                 <tr>
-                  <th className="px-3 py-2">Nama</th>
-                  <th className="px-3 py-2">Lokasi</th>
-                  <th className="px-3 py-2">Unit / Kamar</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Check-in</th>
-                  <th className="px-3 py-2">Check-out</th>
-                  <th className="px-3 py-2">Aksi</th>
+                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Nama</th>
+                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Lokasi</th>
+                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Unit / Kamar</th>
+                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Status</th>
+                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Check-in</th>
+                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Check-out</th>
+                  <th className="min-w-[10.5rem] whitespace-nowrap bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">
+                    Aksi
+                  </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="relative z-0">
                 {isLoading ? (
                   <tr>
                     <td className="px-3 py-4 text-[#856948]" colSpan={7}>
@@ -2433,23 +2441,23 @@ export default function PenghuniPageClient({
                       </td>
                       <td className="px-3 py-2">{row.tglCheckIn || "—"}</td>
                       <td className="px-3 py-2">{row.tglCheckOut || "—"}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {normalizeUserProfileRole(viewerRole) === "super_admin" ? (
-                            <>
-                              <ActionButtonWithIcon
-                                icon={Pencil}
-                                onClick={() => handleEdit(row)}
-                                label="Edit"
-                                className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white"
-                              />
-                              <ActionButtonWithIcon
-                                icon={Trash2}
-                                onClick={() => void deletePenghuniWithConfirm(row)}
-                                label="Hapus"
-                                className="rounded-full bg-red-600 px-2 py-1 text-[10px] font-semibold text-white"
-                              />
-                            </>
+                      <td className="px-3 py-2 align-middle">
+                        <div className="relative z-0 flex flex-wrap gap-1">
+                          {canEditPenghuni ? (
+                            <ActionButtonWithIcon
+                              icon={Pencil}
+                              onClick={() => handleEdit(row)}
+                              label="Edit"
+                              className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white"
+                            />
+                          ) : null}
+                          {canDeletePenghuni ? (
+                            <ActionButtonWithIcon
+                              icon={Trash2}
+                              onClick={() => void deletePenghuniWithConfirm(row)}
+                              label="Hapus"
+                              className="rounded-full bg-red-600 px-2 py-1 text-[10px] font-semibold text-white"
+                            />
                           ) : (
                             <ActionButtonWithIcon
                               icon={CreditCard}
@@ -2557,20 +2565,22 @@ export default function PenghuniPageClient({
           </div>
         </div>
 
-        <div className="mb-4 max-h-[min(320px,45vh)] overflow-y-auto rounded-2xl border border-amber-100 dark:border-[#4a3a22]">
+        <div className="mb-4 max-h-[min(320px,45vh)] isolate overflow-y-auto rounded-2xl border border-amber-100 dark:border-[#4a3a22]">
           <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 bg-amber-50 text-xs uppercase tracking-[0.12em] text-[#8f6a2d] dark:bg-[#2f2618] dark:text-[#dcb97a]">
+            <thead className="sticky top-0 z-30 text-xs uppercase tracking-[0.12em] text-[#8f6a2d] dark:text-[#dcb97a]">
               <tr>
-                <th className="px-2 py-2">Nama</th>
-                <th className="px-2 py-2">Lokasi</th>
-                <th className="px-2 py-2">Unit</th>
-                <th className="px-2 py-2">Rencana CI</th>
-                <th className="px-2 py-2">Negosiasi</th>
-                <th className="px-2 py-2">WA</th>
-                <th className="px-2 py-2">Aksi</th>
+                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Nama</th>
+                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Lokasi</th>
+                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Unit</th>
+                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Rencana CI</th>
+                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Negosiasi</th>
+                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">WA</th>
+                <th className="min-w-[9rem] whitespace-nowrap bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">
+                  Aksi
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="relative z-0">
               {sortedSurveyRows.length === 0 ? (
                 <tr>
                   <td className="px-3 py-4 text-[#856948]" colSpan={7}>

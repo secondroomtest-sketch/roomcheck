@@ -502,7 +502,9 @@ function DashboardShellInner({
             </div>
           </header>
 
-          <main className="safe-x-md min-w-0 flex-1 py-5 sm:py-6">{children}</main>
+          <main className="safe-x-md min-w-0 flex-1 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:py-6 sm:pb-6">
+            {children}
+          </main>
           <footer className={`safe-x-md safe-pb-footer ${isOwnerDashboard ? "relative" : ""}`}>
             <p className="text-right text-[11px] font-medium tracking-[0.12em] text-[#5d6fc0] dark:text-[#aebcff]">
               Version {appVersion}

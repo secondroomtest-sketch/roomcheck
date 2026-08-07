@@ -45,6 +45,7 @@ import {
   resolveDefaultOwnerPnlMonth,
 } from "@/lib/finance-pnl-month";
 import { syncKamarRowsWithPenghuniList } from "@/lib/kamar-penghuni-sync";
+import { computeKamarOccupancyStats } from "@/lib/occupancy-for-month";
 import type { PenghuniRow, SurveyCalonRow } from "@/components/penghuni-page-client";
 import type { FinanceRow } from "@/components/finance-page-client";
 import type { KamarRow } from "@/components/kamar-page-client";
@@ -918,6 +919,18 @@ export default function DashboardPage() {
     return rows;
   }, [kamarRowsSynced, selectedLokasi, selectedUnit]);
 
+  /** Inventaris kamar (tanpa sync status) — basis hitung okupansi historis Owner. */
+  const kamarInventoryFiltered = useMemo(() => {
+    let rows = kamarRows;
+    if (lokasiFilterActive(selectedLokasi)) {
+      rows = rows.filter((k) => k.lokasiKos === selectedLokasi);
+    }
+    if (unitFilterActive(selectedUnit)) {
+      rows = rows.filter((k) => String(k.unitBlok ?? "").trim() === selectedUnit);
+    }
+    return rows;
+  }, [kamarRows, selectedLokasi, selectedUnit]);
+
   const surveyDashboardRows = useMemo(() => {
     let rows = [...surveyCalonRows];
     if (lokasiFilterActive(selectedLokasi)) {
@@ -931,13 +944,22 @@ export default function DashboardPage() {
   }, [surveyCalonRows, selectedLokasi, selectedUnit]);
 
   const dashboardKamarStats = useMemo(() => {
-    const total = kamarRowsFiltered.length;
-    const terisi = kamarRowsFiltered.filter((k) => k.status === "Occupied").length;
-    const kosong = kamarRowsFiltered.filter((k) => k.status === "Available").length;
-    const maintenance = kamarRowsFiltered.filter((k) => k.status === "Maintenance").length;
-    const pct = total > 0 ? Math.round((terisi / total) * 100) : 0;
-    return { total, terisi, kosong, maintenance, pct };
-  }, [kamarRowsFiltered]);
+    if (isOwnerRole) {
+      return computeKamarOccupancyStats(
+        kamarInventoryFiltered,
+        penghuniRows.map((p) => ({
+          status: p.status,
+          lokasiKos: p.lokasiKos,
+          unitBlok: p.unitBlok,
+          noKamar: p.noKamar,
+          tglCheckIn: p.tglCheckIn,
+          tglCheckOut: p.tglCheckOut,
+        })),
+        ownerPnlMonth
+      );
+    }
+    return computeKamarOccupancyStats(kamarRowsFiltered, [], null);
+  }, [isOwnerRole, kamarInventoryFiltered, kamarRowsFiltered, penghuniRows, ownerPnlMonth]);
 
   const maintenanceKamarDetail = useMemo(() => {
     return kamarRowsFiltered
@@ -1093,7 +1115,7 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="min-w-0 space-y-4 sm:space-y-6">
+    <div className="min-w-0 max-w-[100vw] space-y-4 overflow-x-clip sm:space-y-6">
       <section className="rounded-2xl border border-[#d8defc]/70 bg-gradient-to-r from-[#f6f8ff] via-[#eef2ff] to-[#f3f1ff] p-4 shadow-[0_22px_70px_-35px_rgba(63,79,157,0.45)] dark:border-[#4f5b99] dark:from-[#1a2144] dark:via-[#1b1f3d] dark:to-[#1f2344] sm:rounded-[2rem] sm:p-6">
         <div className="flex min-w-0 flex-col gap-4 sm:gap-5 2xl:flex-row 2xl:flex-wrap 2xl:items-start 2xl:justify-between 2xl:gap-x-8">
           <div className="min-w-0 w-full 2xl:min-w-[min(100%,22rem)] 2xl:max-w-[40rem] 2xl:flex-1">
@@ -1127,7 +1149,7 @@ export default function DashboardPage() {
                 setSelectedLokasi(event.target.value);
                 setSelectedUnit(UNIT_SEMUA);
               }}
-              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:flex-1 sm:basis-[11rem] sm:min-w-[11rem]"
+              className="touch-manipulation min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-base text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:flex-1 sm:basis-[11rem] sm:min-w-[11rem] sm:text-sm"
             >
               {lokasiOptions.map((lokasi) => (
                 <option key={lokasi} value={lokasi}>
@@ -1138,7 +1160,7 @@ export default function DashboardPage() {
             <select
               value={selectedUnit}
               onChange={(event) => setSelectedUnit(event.target.value)}
-              className="min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-sm text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:flex-1 sm:basis-[11rem] sm:min-w-[11rem]"
+              className="touch-manipulation min-h-[2.75rem] w-full min-w-0 rounded-full border border-[#d5bea0] bg-white px-4 py-2 text-base text-[#5f472d] outline-none ring-[#b89468] focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#4f3d2b] dark:bg-[#2f2419] dark:text-[#dec49f] sm:flex-1 sm:basis-[11rem] sm:min-w-[11rem] sm:text-sm"
             >
               <option value={UNIT_SEMUA}>{UNIT_SEMUA}</option>
               {unitOptions.map((unit) => (
@@ -1165,7 +1187,7 @@ export default function DashboardPage() {
                     type="month"
                     value={ownerPnlMonth}
                     onChange={(e) => setOwnerPnlMonth(e.target.value || defaultPnlCalendarYm())}
-                    className="min-h-[2.75rem] min-w-0 flex-1 rounded-full border border-[#b89468] bg-white px-3 py-2 text-sm font-medium text-[#4a3824] outline-none ring-[#b89468] focus:ring-2 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] sm:min-w-[9.5rem] sm:flex-none"
+                    className="touch-manipulation min-h-[2.75rem] min-w-0 flex-1 rounded-full border border-[#b89468] bg-white px-3 py-2 text-base font-medium text-[#4a3824] outline-none ring-[#b89468] focus:ring-2 dark:border-[#6b5238] dark:bg-[#2f2419] dark:text-[#dec49f] sm:min-w-[9.5rem] sm:flex-none sm:text-sm"
                   />
                   <button
                     type="button"
@@ -1200,8 +1222,8 @@ export default function DashboardPage() {
         {isOwnerRole && ownerNoDataForMonth ? (
           <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
             Tidak ada transaksi <strong className="font-semibold">kos</strong> untuk P&amp;L bulan{' '}
-            <strong className="font-semibold">{ownerPnlMonth}</strong> pada filter lokasi/unit. Penghuni &amp; okupansi
-            mengikuti filter lokasi/unit; ubah pemilih bulan P&amp;L untuk melihat periode lain.
+            <strong className="font-semibold">{ownerPnlMonth}</strong> pada filter lokasi/unit. Ubah pemilih bulan
+            P&amp;L untuk melihat periode lain. Okupansi juga mengikuti bulan P&amp;L yang dipilih.
           </p>
         ) : null}
         {!localDemoMode && cloudDataError ? (
@@ -1366,7 +1388,9 @@ export default function DashboardPage() {
           ) : null}
           <p className="mt-2 text-xs text-[#816344] dark:text-[#bfa27f]">
             {dashboardKamarStats.total > 0
-              ? `${dashboardKamarStats.terisi} dari ${dashboardKamarStats.total} kamar terisi`
+              ? `${dashboardKamarStats.terisi} dari ${dashboardKamarStats.total} kamar terisi${
+                  isOwnerRole ? ` · bulan ${ownerPnlMonth}` : ""
+                }`
               : "Belum ada data kamar pada filter ini."}
           </p>
         </article>
@@ -1408,7 +1432,9 @@ export default function DashboardPage() {
             {dashboardKamarStats.terisi}
           </p>
           <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">
-            Status Occupied · mengikuti filter lokasi/unit
+            {isOwnerRole
+              ? `Hunian aktif pada bulan ${ownerPnlMonth} · filter lokasi/unit`
+              : "Status Occupied · mengikuti filter lokasi/unit"}
           </p>
         </article>
 
@@ -1429,7 +1455,9 @@ export default function DashboardPage() {
             {dashboardKamarStats.kosong}
           </p>
           <p className="mt-2 text-[11px] leading-relaxed text-[#7d6042] dark:text-[#b79875] sm:text-xs">
-            Status Available · siap sewa
+            {isOwnerRole
+              ? `Tidak terisi pada bulan ${ownerPnlMonth} · siap sewa`
+              : "Status Available · siap sewa"}
           </p>
         </article>
 
@@ -1665,7 +1693,7 @@ export default function DashboardPage() {
             <select
               value={penghuniListFilter}
               onChange={(event) => setPenghuniListFilter(event.target.value as PenghuniListFilter)}
-              className="min-h-[2.75rem] w-full max-w-none rounded-full border border-[#dac3a5] bg-[#fdf9f2] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6e5336] outline-none ring-[#bb986e] focus:ring-2 dark:border-[#56422e] dark:bg-[#2a2016] dark:text-[#d9bc95] sm:w-auto sm:max-w-[min(100%,22rem)] sm:text-xs sm:tracking-[0.12em]"
+              className="touch-manipulation min-h-[2.75rem] w-full max-w-none rounded-full border border-[#dac3a5] bg-[#fdf9f2] px-4 py-2 text-base font-semibold uppercase tracking-[0.08em] text-[#6e5336] outline-none ring-[#bb986e] focus:ring-2 dark:border-[#56422e] dark:bg-[#2a2016] dark:text-[#d9bc95] sm:w-auto sm:max-w-[min(100%,22rem)] sm:text-xs sm:tracking-[0.12em]"
               aria-label="Filter daftar penghuni"
             >
               {PENGHUNI_LIST_FILTER_OPTIONS.map((opt) => (

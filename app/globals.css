@@ -254,6 +254,17 @@ body {
  * Dipakai DashboardShell, landing, login, cetak, dan halaman print.
  */
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* iOS Safari: scroll dalam kartu/list lebih mulus */
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
 .safe-x-md {
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
