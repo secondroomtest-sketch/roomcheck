@@ -33,7 +33,12 @@ import {
   sanitizePenghuniPaymentFlags,
 } from "@/lib/penghuni-finance-payment-sync";
 import { buildDemoLokasiList, buildDemoUnitList } from "@/lib/demo-form-options";
-import { syncKamarRowsWithPenghuniList } from "@/lib/kamar-penghuni-sync";
+import {
+  isPlaceholderNoKamar,
+  penghuniCountsAsOccupyingKamar,
+  syncKamarRowsWithPenghuniList,
+} from "@/lib/kamar-penghuni-sync";
+import { BOOKING_UPLOADS_BUCKET } from "@/lib/bookingkos";
 import { normalizeUserProfileRole } from "@/lib/user-profile-role";
 import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
@@ -90,6 +95,7 @@ export type PenghuniRow = {
   hargaBulanan: string;
   bookingFee: string;
   noWa: string;
+  email?: string;
   status: PenghuniStatus;
   keterangan: string;
   /** Tercatat lunas lewat flow payment sewa kamar di profil. */
@@ -98,6 +104,12 @@ export type PenghuniRow = {
   sewaKamarNota?: string;
   depositKamarPaid?: boolean;
   depositKamarNota?: string;
+  /** Path Storage bucket booking-uploads (foto KTP/identitas). */
+  fotoIdentitasPath?: string;
+  /** Path Storage bucket booking-uploads (bukti transfer). */
+  buktiTransferPath?: string;
+  /** Asal data, mis. public_form. */
+  bookingSource?: string;
   createdAt?: string | null;
 };
 
@@ -315,6 +327,9 @@ export default function PenghuniPageClient({
   const [surveyEditingId, setSurveyEditingId] = useState<string | null>(null);
   const [showPenghuniForm, setShowPenghuniForm] = useState(false);
   const [penghuniProfileRow, setPenghuniProfileRow] = useState<PenghuniRow | null>(null);
+  const [profileFotoIdentitasUrl, setProfileFotoIdentitasUrl] = useState<string | null>(null);
+  const [profileBuktiTransferUrl, setProfileBuktiTransferUrl] = useState<string | null>(null);
+  const [profileDocsLoading, setProfileDocsLoading] = useState(false);
   const [showSewaPaymentPanel, setShowSewaPaymentPanel] = useState(false);
   const [sewaPaymentNominal, setSewaPaymentNominal] = useState("");
   /** Hanya angka setelah prefiks tetap SR (no. nota sewa = SR + angka). */
@@ -504,6 +519,53 @@ export default function PenghuniPageClient({
     const selisih = nominalInput - referensiProfil;
     return { referensiProfil, nominalInput, selisih };
   }, [penghuniProfileRow, depositPaymentNominal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const identitasPath = String(penghuniProfileRow?.fotoIdentitasPath ?? "").trim();
+    const transferPath = String(penghuniProfileRow?.buktiTransferPath ?? "").trim();
+
+    if (!penghuniProfileRow || (!identitasPath && !transferPath) || localDemoMode) {
+      setProfileFotoIdentitasUrl(null);
+      setProfileBuktiTransferUrl(null);
+      setProfileDocsLoading(false);
+      return;
+    }
+
+    setProfileDocsLoading(true);
+    setProfileFotoIdentitasUrl(null);
+    setProfileBuktiTransferUrl(null);
+
+    void (async () => {
+      try {
+        const signOne = async (path: string) => {
+          const { data, error } = await supabase.storage
+            .from(BOOKING_UPLOADS_BUCKET)
+            .createSignedUrl(path, 60 * 10);
+          if (error || !data?.signedUrl) return null;
+          return data.signedUrl;
+        };
+        const [idUrl, tfUrl] = await Promise.all([
+          identitasPath ? signOne(identitasPath) : Promise.resolve(null),
+          transferPath ? signOne(transferPath) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setProfileFotoIdentitasUrl(idUrl);
+        setProfileBuktiTransferUrl(tfUrl);
+      } finally {
+        if (!cancelled) setProfileDocsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    localDemoMode,
+    penghuniProfileRow,
+    penghuniProfileRow?.fotoIdentitasPath,
+    penghuniProfileRow?.buktiTransferPath,
+  ]);
 
   const financeRowsForNotaCheck = useMemo(() => {
     if (!localDemoMode || !sandboxReady) return [] as FinanceRow[];
@@ -714,15 +776,35 @@ export default function PenghuniPageClient({
 
   const availableRoomNumbers = useMemo(() => {
     const source = localDemoMode ? kamarSandboxRows : cloudKamarRows;
+    /** Sumber kebenaran okupansi: data penghuni Booking/Stay, bukan hanya kamar.status di DB. */
+    const occupiedKeys = new Set(
+      data
+        .filter((p) => p.id !== editingId)
+        .filter((p) =>
+          penghuniCountsAsOccupyingKamar({
+            status: p.status,
+            lokasiKos: p.lokasiKos,
+            unitBlok: p.unitBlok,
+            noKamar: p.noKamar,
+            sewaKamarPaid: p.sewaKamarPaid,
+            namaLengkap: p.namaLengkap,
+            tglCheckOut: p.tglCheckOut,
+          })
+        )
+        .map((p) => `${p.lokasiKos.trim()}|${p.unitBlok.trim()}|${p.noKamar.trim()}`)
+    );
+
     const nums = source
-      .filter(
-        (r) =>
-          r.lokasiKos === form.lokasiKos &&
-          r.unitBlok === form.unitBlok &&
-          r.status === "Available"
-      )
+      .filter((r) => {
+        if (r.lokasiKos !== form.lokasiKos || r.unitBlok !== form.unitBlok) return false;
+        if (r.status === "Maintenance") return false;
+        const key = `${r.lokasiKos.trim()}|${r.unitBlok.trim()}|${r.noKamar.trim()}`;
+        if (occupiedKeys.has(key)) return false;
+        /** Jika DB Occupied tapi tidak ada penghuni yang match (stale), tetap izinkan. */
+        return true;
+      })
       .map((r) => r.noKamar)
-      .filter(Boolean);
+      .filter((nk) => Boolean(nk) && !isPlaceholderNoKamar(nk));
 
     const merged = new Set(nums);
     if (editingId && (form.status === "Booking" || form.status === "Stay")) {
@@ -730,7 +812,7 @@ export default function PenghuniPageClient({
       const cur = ed?.noKamar;
       if (
         cur &&
-        cur !== "All Room" &&
+        !isPlaceholderNoKamar(cur) &&
         ed?.lokasiKos === form.lokasiKos &&
         ed?.unitBlok === form.unitBlok
       ) {
@@ -752,12 +834,12 @@ export default function PenghuniPageClient({
 
   useEffect(() => {
     if (availableRoomNumbers.length === 0) {
-      if (form.noKamar !== "" && form.noKamar !== "All Room") {
+      if (form.noKamar !== "" && !isPlaceholderNoKamar(form.noKamar)) {
         setForm((prev) => ({ ...prev, noKamar: "" }));
       }
       return;
     }
-    if (!availableRoomNumbers.includes(form.noKamar)) {
+    if (isPlaceholderNoKamar(form.noKamar) || !availableRoomNumbers.includes(form.noKamar)) {
       setForm((prev) => ({ ...prev, noKamar: availableRoomNumbers[0] ?? "" }));
     }
   }, [availableRoomNumbers, form.status, form.noKamar]);
@@ -835,12 +917,16 @@ export default function PenghuniPageClient({
       hargaBulanan: String(row.harga_bulanan ?? ""),
       bookingFee: String(row.booking_fee ?? ""),
       noWa: String(row.no_wa ?? ""),
+      email: String(row.email ?? ""),
       status,
       keterangan: String(row.keterangan ?? ""),
       sewaKamarPaid: Boolean(row.sewa_kamar_paid),
       sewaKamarNota: String(row.sewa_kamar_nota ?? ""),
       depositKamarPaid: Boolean(row.deposit_kamar_paid),
       depositKamarNota: String(row.deposit_kamar_nota ?? ""),
+      fotoIdentitasPath: String(row.foto_identitas_path ?? ""),
+      buktiTransferPath: String(row.bukti_transfer_path ?? ""),
+      bookingSource: String(row.booking_source ?? ""),
       createdAt: row.created_at ? String(row.created_at) : null,
     };
     return sanitizePenghuniPaymentFlags(mapped);
@@ -1267,7 +1353,9 @@ export default function PenghuniPageClient({
           : getCloudUnitOptionsByLokasi(loc);
         return row.unitBlok && units.includes(row.unitBlok) ? row.unitBlok : units[0] ?? "";
       })(),
-      noKamar: row.noKamar || availableRoomNumbers[0] || "",
+      noKamar: !isPlaceholderNoKamar(row.noKamar)
+        ? row.noKamar
+        : availableRoomNumbers[0] || "",
       periodeSewa: row.periodeSewa || "1",
       tglCheckIn: row.tglCheckIn || "",
       tglCheckOut: row.tglCheckOut || "",
@@ -2291,16 +2379,19 @@ export default function PenghuniPageClient({
                     </td>
                   </tr>
                 ) : (
-                  sortedByCheckOut.map((row) => (
+                  sortedByCheckOut.map((row) => {
+                    const isPublicBooking = row.bookingSource === "public_form";
+                    const rowTone = isPenghuniSewaOverdue(row)
+                      ? "border-l-[5px] border-l-red-900 bg-red-300/95 text-[#450a0a] dark:border-l-red-400 dark:bg-red-900/70 dark:text-red-50"
+                      : penghuniHasOutstandingPayments(row)
+                        ? "border-l-[3px] border-l-amber-500 bg-amber-50/90 text-[#78350f] dark:border-l-amber-400 dark:bg-amber-950/35 dark:text-amber-50"
+                        : isPublicBooking
+                          ? "border-l-[4px] border-l-sky-500 bg-sky-100 text-[#0c4a6e] dark:border-l-sky-400 dark:bg-sky-950/45 dark:text-sky-50"
+                          : "text-[#2c2218] dark:text-[#f5e8d4]";
+                    return (
                     <tr
                       key={row.id}
-                      className={`cursor-pointer border-t border-[#efe2d1] dark:border-[#33261b] ${
-                        isPenghuniSewaOverdue(row)
-                          ? "border-l-[5px] border-l-red-900 bg-red-300/95 dark:border-l-red-400 dark:bg-red-900/70"
-                          : penghuniHasOutstandingPayments(row)
-                            ? "border-l-[3px] border-l-amber-500 bg-amber-50/90 dark:border-l-amber-400 dark:bg-amber-950/35"
-                            : ""
-                      }`}
+                      className={`cursor-pointer border-t border-[#efe2d1] dark:border-[#33261b] ${rowTone}`}
                       onDoubleClick={(e) => {
                         if ((e.target as HTMLElement).closest("button")) return;
                         setHoverKeterangan(null);
@@ -2323,7 +2414,16 @@ export default function PenghuniPageClient({
                         setHoverKeterangan((prev) => (prev?.id === row.id ? null : prev))
                       }
                     >
-                      <td className="px-3 py-2">{row.namaLengkap}</td>
+                      <td className="px-3 py-2 font-medium">
+                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                          {row.namaLengkap}
+                          {isPublicBooking ? (
+                            <span className="rounded-md bg-sky-600/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-400/20 dark:text-sky-100">
+                              Publik
+                            </span>
+                          ) : null}
+                        </span>
+                      </td>
                       <td className="px-3 py-2">{row.lokasiKos}</td>
                       <td className="px-3 py-2">
                         {row.unitBlok} / {row.noKamar}
@@ -2362,7 +2462,8 @@ export default function PenghuniPageClient({
                         </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -2596,6 +2697,82 @@ export default function PenghuniPageClient({
                 <dt className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">No. WA</dt>
                 <dd className="mt-1 text-[#3f2f1f] dark:text-[#e8dcc8]">{penghuniProfileRow.noWa || "—"}</dd>
               </div>
+              {penghuniProfileRow.email ? (
+                <div>
+                  <dt className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">Email</dt>
+                  <dd className="mt-1 break-all text-[#3f2f1f] dark:text-[#e8dcc8]">{penghuniProfileRow.email}</dd>
+                </div>
+              ) : null}
+              {penghuniProfileRow.bookingSource === "public_form" ||
+              penghuniProfileRow.fotoIdentitasPath ||
+              penghuniProfileRow.buktiTransferPath ? (
+                <div>
+                  <dt className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                    Dokumen booking
+                  </dt>
+                  <dd className="mt-2 space-y-3">
+                    {penghuniProfileRow.bookingSource === "public_form" ? (
+                      <p className="text-xs font-medium text-[#5d6fc0] dark:text-[#a8b6ff]">
+                        Dari form publik /bookingkos
+                      </p>
+                    ) : null}
+                    {profileDocsLoading ? (
+                      <p className="text-xs text-[#8b6d48] dark:text-[#b79a78]">Memuat foto…</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b6d48] dark:text-[#b79a78]">
+                            Identitas
+                          </p>
+                          {profileFotoIdentitasUrl ? (
+                            <a
+                              href={profileFotoIdentitasUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block overflow-hidden rounded-xl border border-[#d6ddff] dark:border-[#424a80]"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={profileFotoIdentitasUrl}
+                                alt="Foto identitas"
+                                className="h-28 w-full object-cover"
+                              />
+                            </a>
+                          ) : (
+                            <p className="text-xs text-[#8b6d48] dark:text-[#b79a78]">
+                              {penghuniProfileRow.fotoIdentitasPath ? "Tidak bisa memuat" : "—"}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b6d48] dark:text-[#b79a78]">
+                            Bukti transfer
+                          </p>
+                          {profileBuktiTransferUrl ? (
+                            <a
+                              href={profileBuktiTransferUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block overflow-hidden rounded-xl border border-[#d6ddff] dark:border-[#424a80]"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={profileBuktiTransferUrl}
+                                alt="Bukti transfer"
+                                className="h-28 w-full object-cover"
+                              />
+                            </a>
+                          ) : (
+                            <p className="text-xs text-[#8b6d48] dark:text-[#b79a78]">
+                              {penghuniProfileRow.buktiTransferPath ? "Tidak bisa memuat" : "—"}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </dd>
+                </div>
+              ) : null}
               <div>
                 <dt className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
                   {penghuniProfileRow.status === "Booking" ? "Rencana check-in" : "Tgl check in"}

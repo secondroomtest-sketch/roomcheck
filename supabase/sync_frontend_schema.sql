@@ -203,7 +203,11 @@ alter table public.penghuni add column if not exists sewa_kamar_paid boolean not
 alter table public.penghuni add column if not exists sewa_kamar_nota text;
 alter table public.penghuni add column if not exists deposit_kamar_paid boolean not null default false;
 alter table public.penghuni add column if not exists deposit_kamar_nota text;
+alter table public.penghuni add column if not exists foto_identitas_path text;
+alter table public.penghuni add column if not exists bukti_transfer_path text;
+alter table public.penghuni add column if not exists booking_source text;
 alter table public.penghuni add column if not exists no_wa text;
+alter table public.penghuni add column if not exists email text;
 alter table public.penghuni add column if not exists status text;
 alter table public.penghuni add column if not exists keterangan text;
 alter table public.penghuni add column if not exists created_at timestamptz not null default now();

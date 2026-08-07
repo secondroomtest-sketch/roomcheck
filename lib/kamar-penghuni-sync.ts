@@ -39,13 +39,19 @@ export function isCheckoutDateBeforeToday(tglCheckOut: string): boolean {
   return co.getTime() < startOfLocalToday().getTime();
 }
 
+/** Placeholder no. kamar (form publik / survey) — tidak mengunci kamar manapun. */
+export function isPlaceholderNoKamar(noKamar: string): boolean {
+  const nk = (noKamar ?? "").trim().toLowerCase();
+  return !nk || nk === "-" || nk === "—" || nk === "all room" || nk === "belum ditentukan";
+}
+
 /** Penghuni masih menempati kamar untuk tampilan / sinkron (bukan Maintenance). */
 export function penghuniCountsAsOccupyingKamar(p: PenghuniForKamarSync): boolean {
   if (p.status !== "Booking" && p.status !== "Stay") return false;
   const lok = (p.lokasiKos ?? "").trim();
   const unit = (p.unitBlok ?? "").trim();
   const nk = (p.noKamar ?? "").trim();
-  if (!lok || !unit || !nk || nk === "All Room") return false;
+  if (!lok || !unit || isPlaceholderNoKamar(nk)) return false;
   /** Stay + sewa lunas + check-out lewat → kamar dianggap kosong lagi. */
   if (p.status === "Stay" && p.sewaKamarPaid && isCheckoutDateBeforeToday(p.tglCheckOut)) {
     return false;
