@@ -30,7 +30,7 @@ const initialForm: FormState = {
 };
 
 const fieldClass =
-  "w-full rounded-xl border border-[#c8d0f5] bg-white px-3.5 py-2.5 text-sm text-[#1f1b42] outline-none transition focus:border-[#5b6dff] focus:ring-2 focus:ring-[#5b6dff]/25";
+  "w-full min-h-[48px] rounded-xl border border-[#c8d0f5] bg-white px-3.5 py-3 text-base text-[#1f1b42] outline-none transition focus:border-[#5b6dff] focus:ring-2 focus:ring-[#5b6dff]/25";
 
 function filePreviewUrl(file: File | null): string | null {
   if (!file) return null;
@@ -48,6 +48,7 @@ function PhotoField({
   file,
   onChange,
   error,
+  preferCamera = false,
 }: {
   id: string;
   label: string;
@@ -55,6 +56,8 @@ function PhotoField({
   file: File | null;
   onChange: (file: File | null) => void;
   error?: string;
+  /** true = prefer kamera belakang (identitas); false = izinkan galeri juga (bukti transfer). */
+  preferCamera?: boolean;
 }) {
   const preview = useMemo(() => filePreviewUrl(file), [file]);
 
@@ -69,10 +72,10 @@ function PhotoField({
       <label htmlFor={id} className="block text-sm font-medium text-[#1f1b42]">
         {label} <span className="text-[#6d32ff]">*</span>
       </label>
-      <p className="text-xs text-[#5d6fc0]">{hint}</p>
+      <p className="text-xs leading-relaxed text-[#5d6fc0]">{hint}</p>
       <label
         htmlFor={id}
-        className={`group relative flex min-h-[160px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed transition ${
+        className={`group relative flex min-h-[180px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed transition active:scale-[0.99] sm:min-h-[160px] ${
           error
             ? "border-[#f0a090] bg-[#fff5f0]"
             : "border-[#b8c2f0] bg-[#f3f5ff] hover:border-[#5b6dff] hover:bg-[#eef1ff]"
@@ -91,7 +94,7 @@ function PhotoField({
           </div>
         )}
         {preview ? (
-          <span className="absolute inset-x-0 bottom-0 bg-[#1a1340]/72 px-3 py-2 text-center text-xs font-medium text-white backdrop-blur-sm">
+          <span className="absolute inset-x-0 bottom-0 truncate bg-[#1a1340]/72 px-3 py-2.5 text-center text-xs font-medium text-white backdrop-blur-sm">
             Ketuk untuk ganti · {file?.name}
           </span>
         ) : null}
@@ -100,7 +103,7 @@ function PhotoField({
           name={id}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
-          capture="environment"
+          {...(preferCamera ? { capture: "environment" as const } : {})}
           className="sr-only"
           onChange={(e) => {
             const next = e.target.files?.[0] ?? null;
@@ -258,8 +261,8 @@ export default function BookingkosPageClient() {
       <div className="pointer-events-none absolute inset-0 opacity-75 [background:linear-gradient(148deg,rgba(26,19,64,0.55)_0%,rgba(76,29,149,0.38)_30%,rgba(37,99,235,0.28)_62%,rgba(109,40,217,0.42)_100%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.22] [background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22 viewBox=%220 0 80 80%22%3E%3Cg fill=%22none%22 stroke=%22%23ffffff%22 stroke-opacity=%220.14%22%3E%3Cpath d=%22M0 40h80M40 0v80%22/%3E%3C/g%3E%3C/svg%3E')]" />
 
-      <div className="relative mx-auto w-full max-w-3xl px-4 pb-16 pt-10 sm:px-6 sm:pt-14">
-        <header className="bookingkos-enter space-y-5 text-center">
+      <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(4rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))] sm:px-6 sm:pt-14">
+        <header className="bookingkos-enter space-y-4 text-center sm:space-y-5">
           <div className="mx-auto flex justify-center">
             <div className="bookingkos-logo-neon relative">
               <Image
@@ -269,15 +272,15 @@ export default function BookingkosPageClient() {
                 height={238}
                 priority
                 unoptimized
-                className="relative z-[1] h-auto w-[200px] object-contain sm:w-[240px]"
+                className="relative z-[1] h-auto w-[168px] object-contain sm:w-[240px]"
               />
             </div>
           </div>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-[#e8ecff] sm:text-2xl">
+          <div className="px-1">
+            <h1 className="text-lg font-semibold tracking-tight text-[#e8ecff] sm:text-2xl">
               Formulir booking Kos Granada
             </h1>
-            <p className="mx-auto mt-2 max-w-xl text-base font-bold italic leading-relaxed text-[#d4dcff] sm:text-lg">
+            <p className="mx-auto mt-2 max-w-xl text-[15px] font-bold italic leading-snug text-[#d4dcff] sm:text-lg sm:leading-relaxed">
               Selamat! Kamu orang cerdas yang memilih kos berkelas
             </p>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-[#c5ceff] sm:text-base">
@@ -298,7 +301,7 @@ export default function BookingkosPageClient() {
 
         <form
           onSubmit={handleSubmit}
-          className="bookingkos-enter-delay mt-8 space-y-6 rounded-[1.75rem] border border-[#d8defc]/90 bg-white/90 p-5 shadow-[0_28px_70px_-35px_rgba(40,30,120,0.55)] backdrop-blur-sm sm:p-8"
+          className="bookingkos-enter-delay mt-6 space-y-6 rounded-[1.5rem] border border-[#d8defc]/90 bg-white/90 p-4 shadow-[0_28px_70px_-35px_rgba(40,30,120,0.55)] backdrop-blur-sm sm:mt-8 sm:rounded-[1.75rem] sm:p-8"
         >
           <section className="space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[#5d6fc0]">Data diri</h2>
@@ -497,14 +500,15 @@ export default function BookingkosPageClient() {
                 </div>
               </dl>
             </div>
-            <div className="grid gap-5 sm:grid-cols-2">
+            <div className="grid gap-5">
               <PhotoField
                 id="fotoIdentitas"
                 label="Foto identitas"
-                hint="KTP / identitas resmi yang masih berlaku."
+                hint="KTP / identitas resmi yang masih berlaku. Bisa foto langsung atau pilih dari galeri."
                 file={fotoIdentitas}
                 onChange={setFotoIdentitas}
                 error={fieldErrors.fotoIdentitas}
+                preferCamera
               />
               <PhotoField
                 id="buktiTransfer"
@@ -526,7 +530,7 @@ export default function BookingkosPageClient() {
           <button
             type="submit"
             disabled={isSubmitting || optionsLoading || Boolean(optionsError)}
-            className="btn-tactile group inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 py-3.5 text-sm font-semibold text-white transition hover:from-[#3f5ef0] hover:to-[#5c28e0] disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-tactile group inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 py-3.5 text-base font-semibold text-white transition hover:from-[#3f5ef0] hover:to-[#5c28e0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting ? (
               <>
