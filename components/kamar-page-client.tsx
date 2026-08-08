@@ -17,6 +17,7 @@ import {
 import { iconTone } from "@/lib/ui-accent";
 import StatusBadge from "@/components/ui/status-badge";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
+import BrandLoader from "@/components/ui/brand-loader";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
@@ -762,7 +763,9 @@ export default function KamarPageClient({
 
         <div className="max-h-[min(56vh,520px)] overflow-y-auto pr-1">
           {isLoading ? (
-            <p className="text-sm text-[#856948] dark:text-[#bca17f]">Memuat data kamar...</p>
+            <div className="flex justify-center py-8">
+              <BrandLoader size="sm" label="Memuat data kamar…" />
+            </div>
           ) : (
             <>
               <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

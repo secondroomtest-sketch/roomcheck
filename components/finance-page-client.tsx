@@ -14,6 +14,7 @@ import { supabase } from "@/libsupabaseClient";
 import { Ban, Eye, FileText, HandCoins, Plus, ReceiptText, RotateCcw, Save, Search, X } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
+import BrandLoader from "@/components/ui/brand-loader";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import LaporanLengkapChoiceModal from "@/components/laporan-lengkap-choice-modal";
 import StatusBadge from "@/components/ui/status-badge";
@@ -386,8 +387,8 @@ function FinanceRiwayatTableBlock({
         </div>
         <div className="mt-3 space-y-3 md:hidden">
         {isLoading ? (
-          <div className="rounded-2xl border border-[#eadcc9] bg-[#fffdf9] px-4 py-4 text-sm text-[#856948] dark:border-[#3d2f22] dark:bg-[#2b2016] dark:text-[#bca17f]">
-            Memuat data finance...
+          <div className="flex justify-center rounded-2xl border border-[#eadcc9] bg-[#fffdf9] px-4 py-6 dark:border-[#3d2f22] dark:bg-[#2b2016]">
+            <BrandLoader size="sm" label="Memuat data finance…" />
           </div>
         ) : visibleRows.length === 0 ? (
           <div className="rounded-2xl border border-[#eadcc9] bg-[#fffdf9] px-4 py-4 text-sm text-[#856948] dark:border-[#3d2f22] dark:bg-[#2b2016] dark:text-[#bca17f]">
@@ -486,8 +487,10 @@ function FinanceRiwayatTableBlock({
           <tbody>
             {isLoading ? (
               <tr>
-                <td className="px-3 py-3 text-sm text-[#856948] dark:text-[#bca17f]" colSpan={7}>
-                  Memuat data finance...
+                <td className="px-3 py-6" colSpan={7}>
+                  <div className="flex justify-center py-2">
+                    <BrandLoader size="sm" label="Memuat data finance…" />
+                  </div>
                 </td>
               </tr>
             ) : visibleRows.length === 0 ? (
@@ -1862,13 +1865,12 @@ export default function FinancePageClient({
           </p>
           {filterRiwayatBusy ? (
             <div
-              className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center gap-3 rounded-2xl bg-[#fffdf9]/75 backdrop-blur-[2px] dark:bg-[#1e1812]/70"
+              className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center rounded-2xl bg-[#fffdf9]/75 backdrop-blur-[2px] dark:bg-[#1e1812]/70"
               role="status"
               aria-busy="true"
               aria-label="Memuat riwayat sesuai tanggal"
             >
-              <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-[#4d6dff]/35 border-t-[#6d32ff]" />
-              <p className="text-[13px] font-semibold text-[#4a3824] dark:text-[#f6e9d5]">Memuat riwayat…</p>
+              <BrandLoader size="md" label="Memuat riwayat…" />
             </div>
           ) : null}
           <div

@@ -33,6 +33,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
+import BrandLoader from "@/components/ui/brand-loader";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import StatusBadge from "@/components/ui/status-badge";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
@@ -2647,8 +2648,10 @@ export default function PenghuniPageClient({
               <tbody className="relative z-0">
                 {isLoading ? (
                   <tr>
-                    <td className="px-3 py-4 text-[#856948]" colSpan={7}>
-                      Memuat…
+                    <td className="px-3 py-6" colSpan={7}>
+                      <div className="flex justify-center py-2">
+                        <BrandLoader size="sm" label="Memuat…" />
+                      </div>
                     </td>
                   </tr>
                 ) : displayedPenghuniRows.length === 0 ? (

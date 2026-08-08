@@ -512,4 +512,77 @@ html {
   .bookingkos-logo-neon {
     animation: none;
   }
+
+  .brand-loader-mark,
+  .brand-loader-ring--a,
+  .brand-loader-ring--b {
+    animation: none !important;
+  }
+}
+
+/* Branded app loader: logo breathe + soft orbit rings */
+.brand-loader {
+  display: grid;
+  place-items: center;
+}
+
+.brand-loader-mark {
+  animation: brand-loader-breathe 1.8s ease-in-out infinite;
+  will-change: transform, filter;
+}
+
+.brand-loader-ring {
+  pointer-events: none;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+}
+
+.brand-loader-ring--a {
+  border-top-color: rgba(109, 50, 255, 0.85);
+  border-right-color: rgba(77, 109, 255, 0.55);
+  border-bottom-color: rgba(77, 109, 255, 0.12);
+  border-left-color: rgba(167, 139, 250, 0.35);
+  animation: brand-loader-orbit 2.4s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(109, 50, 255, 0.35));
+}
+
+.brand-loader-ring--b {
+  inset: -12px !important;
+  border-top-color: rgba(77, 109, 255, 0.2);
+  border-right-color: rgba(167, 139, 250, 0.65);
+  border-bottom-color: rgba(109, 50, 255, 0.45);
+  border-left-color: rgba(77, 109, 255, 0.1);
+  animation: brand-loader-orbit-reverse 3.4s linear infinite;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 8px rgba(77, 109, 255, 0.25));
+}
+
+@keyframes brand-loader-breathe {
+  0%,
+  100% {
+    transform: scale(0.96);
+    filter: drop-shadow(0 0 4px rgba(77, 109, 255, 0.25));
+  }
+  50% {
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 14px rgba(109, 50, 255, 0.55));
+  }
+}
+
+@keyframes brand-loader-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes brand-loader-orbit-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
 }

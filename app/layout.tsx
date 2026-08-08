@@ -17,6 +17,13 @@ export const metadata: Metadata = {
   description:
     process.env.NEXT_PUBLIC_APP_DESCRIPTION ??
     "Kelola kos — dashboard penghuni, kamar, dan keuangan.",
+  icons: {
+    icon: [
+      { url: "/icon.png", type: "image/png" },
+      { url: "/favicon.png", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", type: "image/png" }],
+  },
 };
 
 /** Agar `env(safe-area-inset-*)` bekerja di iOS Safari & PWA fullscreen. */

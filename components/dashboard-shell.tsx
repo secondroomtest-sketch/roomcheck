@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { SandboxModeProvider, useSandboxMode } from "@/components/sandbox-mode-provider";
 import { AppFeedbackProvider, useAppFeedback } from "@/components/app-feedback-provider";
+import BrandLoader from "@/components/ui/brand-loader";
 import { readDemoProfileSession, writeDemoProfileSession } from "@/lib/demo-auth";
 import { normalizeUserProfileRole } from "@/lib/user-profile-role";
 import { SupabaseSessionHydratedProvider, useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
@@ -451,15 +452,17 @@ function DashboardShellInner({
                 <button
                   type="button"
                   onClick={() => setProfileMenuOpen((prev) => !prev)}
-                  className={`btn-tactile btn-tactile-soft flex items-center gap-3 text-left ${
-                    isDark ? "text-[#eef2ff]" : "text-[#1f1b42]"
+                  className={`btn-tactile btn-tactile-soft flex items-center gap-2.5 rounded-2xl border px-2.5 py-1.5 text-left shadow-sm transition ${
+                    isDark
+                      ? "border-[#5560a8] bg-[#1f2546]/90 text-[#eef2ff] hover:bg-[#232c58]"
+                      : "border-[#c6d2ff] bg-white/95 text-[#1f1b42] hover:bg-[#eef1ff]"
                   }`}
                 >
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#4d6dff] to-[#6d32ff] text-[11px] font-bold text-[#eef3ff]">
                     {profileInitials}
                   </div>
-                  <div className="leading-tight">
-                    <p className="text-xs font-semibold">{profileName}</p>
+                  <div className="min-w-0 leading-tight">
+                    <p className="truncate text-xs font-semibold">{profileName}</p>
                     <p className={isDark ? "text-[11px] text-[#b5c4ff]" : "text-[11px] text-[#6f7fc2]"}>
                       {profileRole}
                     </p>
@@ -513,23 +516,7 @@ function DashboardShellInner({
         </div>
       </div>
 
-      {hardRefreshLoading ? (
-        <div
-          className="fixed inset-0 z-[388] flex flex-col items-center justify-center bg-[#0f1020]/40 backdrop-blur-[2px] dark:bg-black/50"
-          role="status"
-          aria-busy="true"
-          aria-live="polite"
-          aria-label="Memuat ulang data aplikasi"
-        >
-          <div className="flex flex-col items-center rounded-3xl border border-white/25 bg-white/90 px-8 py-7 shadow-xl dark:border-white/10 dark:bg-[#1c1f3a]/90">
-            <div
-              className="h-12 w-12 animate-spin rounded-full border-[3px] border-[#4d6dff]/35 border-t-[#6d32ff]"
-              aria-hidden
-            />
-            <p className="mt-4 text-sm font-semibold text-[#1f1b42] dark:text-[#eef3ff]">Memuat ulang…</p>
-          </div>
-        </div>
-      ) : null}
+      {hardRefreshLoading ? <BrandLoader variant="overlay" size="lg" label="Memuat ulang…" /> : null}
     </div>
   );
 }
