@@ -5,20 +5,32 @@ import { supabase } from "@/libsupabaseClient";
 import {
   AlertTriangle,
   BedDouble,
+  Bookmark,
+  Building2,
+  CalendarPlus,
+  CheckCircle2,
   ClipboardList,
+  ClipboardPlus,
   ChevronDown,
   CreditCard,
   HandCoins,
+  History,
+  Landmark,
+  LayoutList,
+  LogOut,
+  MapPin,
   MessageCircle,
   Pencil,
   Printer,
   Save,
   Search,
+  Ticket,
   Trash2,
+  UserPlus,
   Users,
-  Wallet,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
@@ -28,8 +40,11 @@ import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY, newSandboxId } from "@/lib/sandbox-storage";
 import {
+  FINANCE_POS_BOOKING_FEE,
   FINANCE_POS_DEPOSIT_KAMAR,
   FINANCE_POS_SEWA_KAMAR,
+  canPromoteBookingToStay,
+  remainingSewaAfterBookingFee,
   sanitizePenghuniPaymentFlags,
 } from "@/lib/penghuni-finance-payment-sync";
 import { buildDemoLokasiList, buildDemoUnitList } from "@/lib/demo-form-options";
@@ -61,6 +76,18 @@ import type { KamarRow } from "@/components/kamar-page-client";
 import type { FinanceRow } from "@/components/finance-page-client";
 
 type PenghuniStatus = "Booking" | "Stay" | "History";
+type PenghuniStatusListFilter = "semua" | PenghuniStatus;
+
+const PENGHUNI_STATUS_FILTER_OPTIONS: Array<{
+  value: PenghuniStatusListFilter;
+  label: string;
+  icon: LucideIcon;
+}> = [
+  { value: "semua", label: "Semua", icon: LayoutList },
+  { value: "Booking", label: "Booking", icon: Bookmark },
+  { value: "Stay", label: "Stay", icon: BedDouble },
+  { value: "History", label: "History", icon: History },
+];
 
 function mapPenghuniStatusFromDb(raw: unknown): PenghuniStatus {
   const s = String(raw ?? "Booking").trim().toLowerCase();
@@ -94,6 +121,8 @@ export type PenghuniRow = {
   sewaCycleEnd?: string;
   hargaBulanan: string;
   bookingFee: string;
+  /** Nominal deposit kamar (terpisah dari booking fee / DP sewa). */
+  depositKamar: string;
   noWa: string;
   email?: string;
   status: PenghuniStatus;
@@ -102,6 +131,9 @@ export type PenghuniRow = {
   sewaKamarPaid?: boolean;
   /** No. nota fisik yang dipakai saat mencatat payment sewa (sinkron dengan Finance). */
   sewaKamarNota?: string;
+  /** Booking fee / DP sewa sudah lunas. */
+  bookingFeePaid?: boolean;
+  bookingFeeNota?: string;
   depositKamarPaid?: boolean;
   depositKamarNota?: string;
   /** Path Storage bucket booking-uploads (foto KTP/identitas). */
@@ -169,12 +201,20 @@ function addCalendarMonthsToIsoDate(iso: string, months: number): string {
 
 function penghuniHasOutstandingPayments(p: PenghuniRow): boolean {
   if (p.status !== "Booking" && p.status !== "Stay") return false;
-  const sewaDue =
-    parseRupiahToNumber(p.hargaBulanan) > 0 &&
-    Math.max(0, Math.floor(Number(p.periodeSewa) || 0)) > 0 &&
-    !p.sewaKamarPaid;
-  const depDue = parseRupiahToNumber(p.bookingFee) > 0 && !p.depositKamarPaid;
-  return sewaDue || depDue;
+  const harga = parseRupiahToNumber(p.hargaBulanan);
+  const periode = Math.max(0, Math.floor(Number(p.periodeSewa) || 0));
+  const bookingFee = parseRupiahToNumber(p.bookingFee);
+  const deposit = parseRupiahToNumber(p.depositKamar);
+  const sewaRemaining = remainingSewaAfterBookingFee({
+    hargaBulanan: harga,
+    periodeBulan: periode,
+    bookingFee,
+    bookingFeePaid: p.bookingFeePaid,
+  });
+  const sewaDue = sewaRemaining > 0 && !p.sewaKamarPaid;
+  const bookingDue = p.status === "Booking" && bookingFee > 0 && !p.bookingFeePaid;
+  const depDue = deposit > 0 && !p.depositKamarPaid;
+  return sewaDue || bookingDue || depDue;
 }
 
 function isPenghuniSewaOverdue(p: PenghuniRow): boolean {
@@ -242,6 +282,7 @@ const initialForm: PenghuniForm = {
   tglCheckOut: "",
   hargaBulanan: "",
   bookingFee: "",
+  depositKamar: "",
   noWa: "",
   status: "Booking",
   keterangan: "",
@@ -342,9 +383,13 @@ export default function PenghuniPageClient({
   const [extendStayNominalBulanan, setExtendStayNominalBulanan] = useState("");
   const [isSubmittingExtendStay, setIsSubmittingExtendStay] = useState(false);
   const [showDepositPaymentPanel, setShowDepositPaymentPanel] = useState(false);
+  /** Panel deposit dipakai untuk booking fee (DP) atau deposit kamar. */
+  const [depositPaymentKind, setDepositPaymentKind] = useState<"booking_fee" | "deposit">("deposit");
   const [depositPaymentNominal, setDepositPaymentNominal] = useState("");
   /** Hanya angka setelah prefiks tetap SR (no. nota deposit = SR + angka). */
   const [depositPaymentNotaDigits, setDepositPaymentNotaDigits] = useState("");
+  /** Tanggal pembayaran booking fee / deposit (YYYY-MM-DD), default hari ini. */
+  const [depositPaymentTanggal, setDepositPaymentTanggal] = useState(() => new Date().toISOString().slice(0, 10));
   /** Nota SR dengan nilai numerik tertinggi di tabel finance (untuk label di profil/panel payment). */
   const [lastUsedSrNota, setLastUsedSrNota] = useState<string | null>(null);
   /** Duplikat no nota vs tabel finance (Supabase), untuk panel payment penghuni. */
@@ -362,6 +407,7 @@ export default function PenghuniPageClient({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [selectedLokasiFilter, setSelectedLokasiFilter] = useState("Semua Lokasi");
   const [selectedUnitFilter, setSelectedUnitFilter] = useState("Semua Blok/Unit");
+  const [penghuniStatusFilter, setPenghuniStatusFilter] = useState<PenghuniStatusListFilter>("semua");
   const [penghuniListSearch, setPenghuniListSearch] = useState("");
   /** Tooltip keterangan baris tabel (fixed supaya tidak terpotong overflow). */
   const [hoverKeterangan, setHoverKeterangan] = useState<{
@@ -457,28 +503,32 @@ export default function PenghuniPageClient({
 
   const isBlueAccent = form.status === "Booking" || form.status === "Stay";
 
-  /** Booking: (harga × periode) − booking fee. Stay: (harga × periode bulan) + deposit kamar (nilai di field bookingFee). */
+  /** Booking: sisa = (harga×periode − DP jika lunas) + deposit belum lunas. Stay: sewa siklus + deposit. */
   const pembayaranRingkasanDisplay = useMemo(() => {
     const h = parseRupiahToNumber(form.hargaBulanan);
-    const deposit = parseRupiahToNumber(form.bookingFee);
+    const bookingFee = parseRupiahToNumber(form.bookingFee);
+    const deposit = parseRupiahToNumber(form.depositKamar);
     const bulan = Math.max(0, Math.floor(Number(form.periodeSewa) || 0));
 
     if (form.status === "Stay") {
       const hasH = Boolean(form.hargaBulanan.replace(/\D/g, ""));
-      const hasD = Boolean(form.bookingFee.replace(/\D/g, ""));
+      const hasD = Boolean(form.depositKamar.replace(/\D/g, ""));
       if (!hasH && !hasD && bulan === 0) return "—";
       const total = h * bulan + deposit;
       const formatted = Math.abs(total).toLocaleString("id-ID");
       return total < 0 ? `Rp -${formatted}` : `Rp ${formatted}`;
     }
 
-    const hasH = Boolean(form.hargaBulanan.replace(/\D/g, ""));
-    const hasB = Boolean(form.bookingFee.replace(/\D/g, ""));
-    if (!hasH && !hasB && bulan === 0) return "—";
-    const sisa = h * bulan - deposit;
-    const formatted = Math.abs(sisa).toLocaleString("id-ID");
-    return sisa < 0 ? `Rp -${formatted}` : `Rp ${formatted}`;
-  }, [form.status, form.hargaBulanan, form.bookingFee, form.periodeSewa]);
+    const hasAny =
+      Boolean(form.hargaBulanan.replace(/\D/g, "")) ||
+      Boolean(form.bookingFee.replace(/\D/g, "")) ||
+      Boolean(form.depositKamar.replace(/\D/g, ""));
+    if (!hasAny && bulan === 0) return "—";
+    const sisaSewa = Math.max(0, h * bulan - bookingFee);
+    const total = sisaSewa + deposit;
+    const formatted = Math.abs(total).toLocaleString("id-ID");
+    return total < 0 ? `Rp -${formatted}` : `Rp ${formatted}`;
+  }, [form.status, form.hargaBulanan, form.bookingFee, form.depositKamar, form.periodeSewa]);
 
   const profilePanelDerived = useMemo(() => {
     if (!penghuniProfileRow) return null;
@@ -487,28 +537,40 @@ export default function PenghuniPageClient({
     const bulan = Math.max(0, Math.floor(Number(r.periodeSewa) || 0));
     const sewaTotal = h * bulan;
     const bookingFeeNum = parseRupiahToNumber(r.bookingFee);
-    const sisaBooking = sewaTotal - bookingFeeNum;
+    const depositNum = parseRupiahToNumber(r.depositKamar);
+    const sisaSewaTarget = Math.max(0, sewaTotal - bookingFeeNum);
+    const sisaSewaUnpaid = r.sewaKamarPaid ? 0 : sisaSewaTarget;
+    const sisaKeStay = sisaSewaUnpaid + (r.depositKamarPaid ? 0 : depositNum);
     const sisaFormatted =
       r.status === "Booking"
-        ? `${sisaBooking < 0 ? "−" : ""}Rp ${Math.abs(sisaBooking).toLocaleString("id-ID")}`
+        ? `${sisaKeStay < 0 ? "−" : ""}Rp ${Math.abs(sisaKeStay).toLocaleString("id-ID")}`
         : null;
     return {
-      depositLabel: r.status === "Stay" ? "Deposit kamar" : "Booking fee",
-      depositFormatted: formatRupiahRingkasan(r.bookingFee),
+      depositLabel: "Deposit kamar",
+      depositFormatted: formatRupiahRingkasan(r.depositKamar),
+      bookingFeeFormatted: formatRupiahRingkasan(r.bookingFee),
       sewaFormatted: `Rp ${sewaTotal.toLocaleString("id-ID")}`,
+      sisaSewaFormatted: `Rp ${sisaSewaTarget.toLocaleString("id-ID")}`,
       hargaBulanFormatted: formatRupiahRingkasan(r.hargaBulanan),
       periodeBulan: bulan,
       sisaPembayaranBookingFormatted: sisaFormatted,
+      sisaSewa: sisaSewaTarget,
+      depositNum,
     };
   }, [penghuniProfileRow]);
 
-  /** Referensi sewa profil (harga × periode) vs nominal input panel — selisih = input − referensi. */
+  /** Referensi sisa sewa (setelah DP booking fee jika sudah lunas) vs nominal input. */
   const sewaPaymentDerived = useMemo(() => {
     if (!penghuniProfileRow) return null;
     const r = penghuniProfileRow;
     const h = parseRupiahToNumber(r.hargaBulanan);
     const bulan = Math.max(0, Math.floor(Number(r.periodeSewa) || 0));
-    const referensiProfil = h * bulan;
+    const referensiProfil = remainingSewaAfterBookingFee({
+      hargaBulanan: h,
+      periodeBulan: bulan,
+      bookingFee: parseRupiahToNumber(r.bookingFee),
+      bookingFeePaid: r.bookingFeePaid,
+    });
     const nominalInput = parseRupiahToNumber(sewaPaymentNominal);
     const selisih = nominalInput - referensiProfil;
     return { referensiProfil, nominalInput, selisih };
@@ -516,11 +578,14 @@ export default function PenghuniPageClient({
 
   const depositPaymentDerived = useMemo(() => {
     if (!penghuniProfileRow) return null;
-    const referensiProfil = parseRupiahToNumber(penghuniProfileRow.bookingFee);
+    const referensiProfil =
+      depositPaymentKind === "booking_fee"
+        ? parseRupiahToNumber(penghuniProfileRow.bookingFee)
+        : parseRupiahToNumber(penghuniProfileRow.depositKamar);
     const nominalInput = parseRupiahToNumber(depositPaymentNominal);
     const selisih = nominalInput - referensiProfil;
     return { referensiProfil, nominalInput, selisih };
-  }, [penghuniProfileRow, depositPaymentNominal]);
+  }, [penghuniProfileRow, depositPaymentNominal, depositPaymentKind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -725,10 +790,14 @@ export default function PenghuniPageClient({
     });
   }, [data, selectedLokasiFilter, selectedUnitFilter]);
 
-  const filteredPenghuniForList = useMemo(
-    () => filteredData.filter((row) => row.status === "Booking" || row.status === "Stay"),
-    [filteredData]
-  );
+  const filteredPenghuniForList = useMemo(() => {
+    return filteredData.filter((row) => {
+      if (row.status !== "Booking" && row.status !== "Stay") return false;
+      if (penghuniStatusFilter === "semua") return true;
+      if (penghuniStatusFilter === "History") return false;
+      return row.status === penghuniStatusFilter;
+    });
+  }, [filteredData, penghuniStatusFilter]);
 
   const filteredPenghuniBySearch = useMemo(() => {
     const q = penghuniListSearch.trim().toLowerCase();
@@ -755,11 +824,38 @@ export default function PenghuniPageClient({
     });
   }, [historyData, selectedLokasiFilter, selectedUnitFilter]);
 
+  const filteredHistoryBySearch = useMemo(() => {
+    const q = penghuniListSearch.trim().toLowerCase();
+    if (!q) return filteredHistoryData;
+    return filteredHistoryData.filter((row) => {
+      const nama = (row.namaLengkap ?? "").toLowerCase();
+      const checkIn = (row.tglCheckIn ?? "").toLowerCase();
+      return nama.includes(q) || checkIn.includes(q);
+    });
+  }, [filteredHistoryData, penghuniListSearch]);
+
   const sortedHistoryByCheckOut = useMemo(() => {
-    const copy = [...filteredHistoryData];
+    const copy = [...filteredHistoryBySearch];
     copy.sort((a, b) => sortDateKey(b.tglCheckOut) - sortDateKey(a.tglCheckOut));
     return copy;
-  }, [filteredHistoryData]);
+  }, [filteredHistoryBySearch]);
+
+  const penghuniStatusFilterCounts = useMemo(() => {
+    const booking = filteredData.filter((r) => r.status === "Booking").length;
+    const stay = filteredData.filter((r) => r.status === "Stay").length;
+    const history = filteredHistoryData.length;
+    return {
+      semua: booking + stay,
+      Booking: booking,
+      Stay: stay,
+      History: history,
+    } as Record<PenghuniStatusListFilter, number>;
+  }, [filteredData, filteredHistoryData]);
+
+  const displayedPenghuniRows = useMemo(
+    () => (penghuniStatusFilter === "History" ? sortedHistoryByCheckOut : sortedByCheckOut),
+    [penghuniStatusFilter, sortedHistoryByCheckOut, sortedByCheckOut]
+  );
 
   const filteredSurveyRows = useMemo(() => {
     return surveyCalon.filter((row) => {
@@ -854,8 +950,11 @@ export default function PenghuniPageClient({
     let nextPen = rawPen.filter((p) => String(p.status) !== "Survey").map((r) => ({
       ...(r as PenghuniRow),
       bookingFee: (r as PenghuniRow).bookingFee ?? "",
+      depositKamar: (r as PenghuniRow).depositKamar ?? "",
       sewaKamarPaid: Boolean((r as PenghuniRow).sewaKamarPaid),
       sewaKamarNota: String((r as PenghuniRow).sewaKamarNota ?? ""),
+      bookingFeePaid: Boolean((r as PenghuniRow).bookingFeePaid),
+      bookingFeeNota: String((r as PenghuniRow).bookingFeeNota ?? ""),
       depositKamarPaid: Boolean((r as PenghuniRow).depositKamarPaid),
       depositKamarNota: String((r as PenghuniRow).depositKamarNota ?? ""),
     })) as PenghuniRow[];
@@ -866,6 +965,8 @@ export default function PenghuniPageClient({
       return (
         Boolean(p.sewaKamarPaid) !== Boolean(n.sewaKamarPaid) ||
         String(p.sewaKamarNota ?? "") !== String(n.sewaKamarNota ?? "") ||
+        Boolean(p.bookingFeePaid) !== Boolean(n.bookingFeePaid) ||
+        String(p.bookingFeeNota ?? "") !== String(n.bookingFeeNota ?? "") ||
         Boolean(p.depositKamarPaid) !== Boolean(n.depositKamarPaid) ||
         String(p.depositKamarNota ?? "") !== String(n.depositKamarNota ?? "")
       );
@@ -918,12 +1019,15 @@ export default function PenghuniPageClient({
       sewaCycleEnd: String(row.sewa_cycle_end ?? ""),
       hargaBulanan: String(row.harga_bulanan ?? ""),
       bookingFee: String(row.booking_fee ?? ""),
+      depositKamar: String(row.deposit_kamar ?? ""),
       noWa: String(row.no_wa ?? ""),
       email: String(row.email ?? ""),
       status,
       keterangan: String(row.keterangan ?? ""),
       sewaKamarPaid: Boolean(row.sewa_kamar_paid),
       sewaKamarNota: String(row.sewa_kamar_nota ?? ""),
+      bookingFeePaid: Boolean(row.booking_fee_paid),
+      bookingFeeNota: String(row.booking_fee_nota ?? ""),
       depositKamarPaid: Boolean(row.deposit_kamar_paid),
       depositKamarNota: String(row.deposit_kamar_nota ?? ""),
       fotoIdentitasPath: String(row.foto_identitas_path ?? ""),
@@ -941,8 +1045,11 @@ export default function PenghuniPageClient({
       const mapped = raw.map((r) => ({
         ...r,
         bookingFee: r.bookingFee ?? "",
+        depositKamar: r.depositKamar ?? "",
         sewaKamarPaid: Boolean(r.sewaKamarPaid),
         sewaKamarNota: String(r.sewaKamarNota ?? ""),
+        bookingFeePaid: Boolean(r.bookingFeePaid),
+        bookingFeeNota: String(r.bookingFeeNota ?? ""),
         depositKamarPaid: Boolean(r.depositKamarPaid),
         depositKamarNota: String(r.depositKamarNota ?? ""),
       }));
@@ -952,6 +1059,8 @@ export default function PenghuniPageClient({
         return (
           Boolean(p.sewaKamarPaid) !== Boolean(n.sewaKamarPaid) ||
           String(p.sewaKamarNota ?? "") !== String(n.sewaKamarNota ?? "") ||
+          Boolean(p.bookingFeePaid) !== Boolean(n.bookingFeePaid) ||
+          String(p.bookingFeeNota ?? "") !== String(n.bookingFeeNota ?? "") ||
           Boolean(p.depositKamarPaid) !== Boolean(n.depositKamarPaid) ||
           String(p.depositKamarNota ?? "") !== String(n.depositKamarNota ?? "")
         );
@@ -1003,6 +1112,16 @@ export default function PenghuniPageClient({
         if (!upErr) {
           r.deposit_kamar_paid = false;
           r.deposit_kamar_nota = null;
+        }
+      }
+      if (Boolean(r.booking_fee_paid) && !String(r.booking_fee_nota ?? "").trim()) {
+        const { error: upErr } = await supabase
+          .from("penghuni")
+          .update({ booking_fee_paid: false, booking_fee_nota: null })
+          .eq("id", id);
+        if (!upErr) {
+          r.booking_fee_paid = false;
+          r.booking_fee_nota = null;
         }
       }
     }
@@ -1103,8 +1222,13 @@ export default function PenghuniPageClient({
       if (
         fresh.sewaKamarPaid === prev.sewaKamarPaid &&
         String(fresh.sewaKamarNota ?? "") === String(prev.sewaKamarNota ?? "") &&
+        fresh.bookingFeePaid === prev.bookingFeePaid &&
+        String(fresh.bookingFeeNota ?? "") === String(prev.bookingFeeNota ?? "") &&
         fresh.depositKamarPaid === prev.depositKamarPaid &&
-        String(fresh.depositKamarNota ?? "") === String(prev.depositKamarNota ?? "")
+        String(fresh.depositKamarNota ?? "") === String(prev.depositKamarNota ?? "") &&
+        String(fresh.depositKamar ?? "") === String(prev.depositKamar ?? "") &&
+        String(fresh.bookingFee ?? "") === String(prev.bookingFee ?? "") &&
+        fresh.status === prev.status
       ) {
         return prev;
       }
@@ -1257,11 +1381,14 @@ export default function PenghuniPageClient({
       sewa_cycle_end: form.status === "Stay" ? form.tglCheckOut || null : null,
       harga_bulanan: parseRupiahToNumber(form.hargaBulanan),
       booking_fee: parseRupiahToNumber(form.bookingFee),
+      deposit_kamar: parseRupiahToNumber(form.depositKamar),
       no_wa: form.noWa,
       status: form.status,
       keterangan: form.keterangan,
       sewa_kamar_paid: existingPenghuniRow?.sewaKamarPaid ?? false,
       sewa_kamar_nota: existingPenghuniRow?.sewaKamarNota?.trim() || null,
+      booking_fee_paid: existingPenghuniRow?.bookingFeePaid ?? false,
+      booking_fee_nota: existingPenghuniRow?.bookingFeeNota?.trim() || null,
       deposit_kamar_paid: existingPenghuniRow?.depositKamarPaid ?? false,
       deposit_kamar_nota: existingPenghuniRow?.depositKamarNota?.trim() || null,
     };
@@ -1280,11 +1407,14 @@ export default function PenghuniPageClient({
         sewaCycleEnd: form.status === "Stay" ? form.tglCheckOut : "",
         hargaBulanan: String(parseRupiahToNumber(form.hargaBulanan)),
         bookingFee: String(parseRupiahToNumber(form.bookingFee)),
+        depositKamar: String(parseRupiahToNumber(form.depositKamar)),
         noWa: form.noWa,
         status: form.status,
         keterangan: form.keterangan,
         sewaKamarPaid: existingPenghuniRow?.sewaKamarPaid ?? false,
         sewaKamarNota: existingPenghuniRow?.sewaKamarNota ?? "",
+        bookingFeePaid: existingPenghuniRow?.bookingFeePaid ?? false,
+        bookingFeeNota: existingPenghuniRow?.bookingFeeNota ?? "",
         depositKamarPaid: existingPenghuniRow?.depositKamarPaid ?? false,
         depositKamarNota: existingPenghuniRow?.depositKamarNota ?? "",
         createdAt: new Date().toISOString(),
@@ -1363,6 +1493,7 @@ export default function PenghuniPageClient({
       tglCheckOut: row.tglCheckOut || "",
       hargaBulanan: formatRupiahInput(row.hargaBulanan || ""),
       bookingFee: formatRupiahInput(row.bookingFee || ""),
+      depositKamar: formatRupiahInput(row.depositKamar || ""),
       noWa: row.noWa || "",
       status: row.status,
       keterangan: row.keterangan || "",
@@ -1831,6 +1962,7 @@ export default function PenghuniPageClient({
     if (!penghuniProfileRow) return;
     const h = parseRupiahToNumber(penghuniProfileRow.hargaBulanan);
     const bulan = Math.max(0, Math.floor(Number(penghuniProfileRow.periodeSewa) || 0));
+    const bookingFeeNum = parseRupiahToNumber(penghuniProfileRow.bookingFee);
     if (penghuniProfileRow.status === "Booking") {
       if (!getActiveSewaCycleStart(penghuniProfileRow)) {
         toast("Isi rencana check-in terlebih dahulu (data penghuni).", "error");
@@ -1840,8 +1972,18 @@ export default function PenghuniPageClient({
         toast("Periode sewa harus lebih dari 0 bulan.", "error");
         return;
       }
+      if (bookingFeeNum > 0 && !penghuniProfileRow.bookingFeePaid) {
+        toast("Lunasi booking fee terlebih dahulu, baru bayar sisa sewa kamar.", "error");
+        return;
+      }
     }
-    setSewaPaymentNominal(formatRupiahInput(String(h * bulan)));
+    const sisaSewa = remainingSewaAfterBookingFee({
+      hargaBulanan: h,
+      periodeBulan: bulan,
+      bookingFee: bookingFeeNum,
+      bookingFeePaid: penghuniProfileRow.bookingFeePaid,
+    });
+    setSewaPaymentNominal(formatRupiahInput(String(sisaSewa)));
     const nextNotaDigits = localDemoMode
       ? suggestNextSrNotaDigits(readSandboxJson<FinanceRow[]>(SB_KEY.finance, []))
       : suggestNextSrNotaDigitsFromLast(lastUsedSrNota);
@@ -1851,13 +1993,28 @@ export default function PenghuniPageClient({
     setShowSewaPaymentPanel(true);
   };
 
-  const openDepositPaymentPanel = () => {
+  const openBookingFeePaymentPanel = () => {
     if (!penghuniProfileRow) return;
+    setDepositPaymentKind("booking_fee");
     setDepositPaymentNominal(formatRupiahInput(penghuniProfileRow.bookingFee || ""));
     const nextNotaDigits = localDemoMode
       ? suggestNextSrNotaDigits(readSandboxJson<FinanceRow[]>(SB_KEY.finance, []))
       : suggestNextSrNotaDigitsFromLast(lastUsedSrNota);
     setDepositPaymentNotaDigits(nextNotaDigits);
+    setDepositPaymentTanggal(new Date().toISOString().slice(0, 10));
+    setShowSewaPaymentPanel(false);
+    setShowDepositPaymentPanel(true);
+  };
+
+  const openDepositPaymentPanel = () => {
+    if (!penghuniProfileRow) return;
+    setDepositPaymentKind("deposit");
+    setDepositPaymentNominal(formatRupiahInput(penghuniProfileRow.depositKamar || ""));
+    const nextNotaDigits = localDemoMode
+      ? suggestNextSrNotaDigits(readSandboxJson<FinanceRow[]>(SB_KEY.finance, []))
+      : suggestNextSrNotaDigitsFromLast(lastUsedSrNota);
+    setDepositPaymentNotaDigits(nextNotaDigits);
+    setDepositPaymentTanggal(new Date().toISOString().slice(0, 10));
     setShowSewaPaymentPanel(false);
     setShowDepositPaymentPanel(true);
   };
@@ -1918,17 +2075,24 @@ export default function PenghuniPageClient({
       toast("Periode sewa (bulan) harus lebih dari 0.", "error");
       return;
     }
+    const bookingFeeNum = parseRupiahToNumber(row.bookingFee);
+    if (row.status === "Booking" && bookingFeeNum > 0 && !row.bookingFeePaid) {
+      toast("Lunasi booking fee terlebih dahulu, baru bayar sisa sewa kamar.", "error");
+      return;
+    }
     const activeCycleStart = getActiveSewaCycleStart(row);
     if (!activeCycleStart) {
       toast("Tanggal mulai siklus sewa tidak valid.", "error");
       return;
     }
+
+    const willPromote = canPromoteBookingToStay({
+      sewaKamarPaid: true,
+      depositKamar: parseRupiahToNumber(row.depositKamar),
+      depositKamarPaid: row.depositKamarPaid,
+    });
     let tglCheckOutBaru = "";
-    if (row.status === "Booking") {
-      if (!activeCycleStart) {
-        toast("Rencana check-in dan periode sewa harus valid untuk mengubah status jadi Stay.", "error");
-        return;
-      }
+    if (row.status === "Booking" && willPromote) {
       tglCheckOutBaru = addCalendarMonthsToIsoDate(activeCycleStart, bulan);
       if (!tglCheckOutBaru) {
         toast("Tanggal check-out tidak bisa dihitung dari rencana check-in.", "error");
@@ -1950,9 +2114,11 @@ export default function PenghuniPageClient({
 
     const hitungText = `Perhitungan: ${formatRpNumber(nominalNum)} − ${formatRpNumber(referensiProfil)} = ${formatRpNumber(selisih)}.`;
     const statusNote =
-      row.status === "Booking"
+      row.status === "Booking" && willPromote
         ? ` Status penghuni berubah menjadi Stay; tgl check-out otomatis ${tglCheckOutBaru} (rencana check-in + ${bulan} bulan).`
-        : " Status sewa kamar ditandai lunas.";
+        : row.status === "Booking"
+          ? " Status sewa kamar ditandai lunas. Status tetap Booking sampai deposit juga lunas (atau deposit = 0)."
+          : " Status sewa kamar ditandai lunas.";
     const ok = await confirm({
       title: "Konfirmasi payment sewa kamar?",
       message: `${hitungText} Catat pembayaran (nota ${noNota}) untuk ${row.namaLengkap}? Di Finance akan dibuat ${bulan} transaksi pemasukan (nota sama), nominal per bulan mengikuti pembagian rata, bulan laporan mengikuti kalender mulai bulan check-in.${statusNote}`,
@@ -1964,6 +2130,16 @@ export default function PenghuniPageClient({
       return;
     }
 
+    const stayPatch =
+      row.status === "Booking" && willPromote
+        ? {
+            status: "Stay" as PenghuniStatus,
+            tglCheckOut: tglCheckOutBaru,
+            sewaCycleStart: activeCycleStart,
+            sewaCycleEnd: tglCheckOutBaru,
+          }
+        : { sewaCycleStart: activeCycleStart };
+
     if (localDemoMode) {
       const paymentSplitGroupId =
         typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : newSandboxId();
@@ -1973,14 +2149,7 @@ export default function PenghuniPageClient({
               ...p,
               sewaKamarPaid: true,
               sewaKamarNota: noNota,
-              ...(row.status === "Booking"
-                ? {
-                    status: "Stay" as PenghuniStatus,
-                    tglCheckOut: tglCheckOutBaru,
-                    sewaCycleStart: activeCycleStart,
-                    sewaCycleEnd: tglCheckOutBaru,
-                  }
-                : { sewaCycleStart: activeCycleStart }),
+              ...stayPatch,
             }
           : p
       );
@@ -1990,14 +2159,7 @@ export default function PenghuniPageClient({
         ...row,
         sewaKamarPaid: true,
         sewaKamarNota: noNota,
-        ...(row.status === "Booking"
-          ? {
-              status: "Stay" as PenghuniStatus,
-              tglCheckOut: tglCheckOutBaru,
-              sewaCycleStart: activeCycleStart,
-              sewaCycleEnd: tglCheckOutBaru,
-            }
-          : { sewaCycleStart: activeCycleStart }),
+        ...stayPatch,
       });
       const fin = readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
       const newFinRows: FinanceRow[] = monthStarts.map((pel, idx) => {
@@ -2050,7 +2212,7 @@ export default function PenghuniPageClient({
         sewa_kamar_nota: noNota,
         sewa_cycle_start: activeCycleStart,
       };
-      if (row.status === "Booking") {
+      if (row.status === "Booking" && willPromote) {
         penUpdate.status = "Stay";
         penUpdate.tgl_check_out = tglCheckOutBaru;
         penUpdate.sewa_cycle_end = tglCheckOutBaru;
@@ -2069,14 +2231,7 @@ export default function PenghuniPageClient({
               ...prev,
               sewaKamarPaid: true,
               sewaKamarNota: noNota,
-              ...(row.status === "Booking"
-                ? {
-                    status: "Stay" as PenghuniStatus,
-                    tglCheckOut: tglCheckOutBaru,
-                    sewaCycleStart: activeCycleStart,
-                    sewaCycleEnd: tglCheckOutBaru,
-                  }
-                : { sewaCycleStart: activeCycleStart }),
+              ...stayPatch,
             }
           : prev
       );
@@ -2089,6 +2244,7 @@ export default function PenghuniPageClient({
   const handleDepositPaymentSekarang = async () => {
     const row = penghuniProfileRow;
     if (!row) return;
+    const isBookingFee = depositPaymentKind === "booking_fee";
     const digits = sanitizeSrNotaDigits(depositPaymentNotaDigits);
     const noNota = formatSrNotaFromDigits(digits);
     if (!isValidSrNotaDigits(digits)) {
@@ -2120,10 +2276,44 @@ export default function PenghuniPageClient({
       );
       return;
     }
+    const paymentDate = String(depositPaymentTanggal ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+      toast("Isi tanggal payment yang valid.", "error");
+      return;
+    }
+
+    const willPromote =
+      !isBookingFee &&
+      row.status === "Booking" &&
+      canPromoteBookingToStay({
+        sewaKamarPaid: row.sewaKamarPaid,
+        depositKamar: parseRupiahToNumber(row.depositKamar),
+        depositKamarPaid: true,
+      });
+    const bulan = Math.max(0, Math.floor(Number(row.periodeSewa) || 0));
+    const activeCycleStart = getActiveSewaCycleStart(row);
+    let tglCheckOutBaru = "";
+    if (willPromote) {
+      if (!activeCycleStart || bulan <= 0) {
+        toast("Rencana check-in dan periode sewa harus valid untuk mengubah status jadi Stay.", "error");
+        return;
+      }
+      tglCheckOutBaru = addCalendarMonthsToIsoDate(activeCycleStart, bulan);
+      if (!tglCheckOutBaru) {
+        toast("Tanggal check-out tidak bisa dihitung dari rencana check-in.", "error");
+        return;
+      }
+    }
+
     const hitungText = `Perhitungan: ${formatRpNumber(nominalNum)} − ${formatRpNumber(referensiProfil)} = ${formatRpNumber(selisih)}.`;
+    const stayNote = willPromote
+      ? ` Status penghuni berubah menjadi Stay; tgl check-out otomatis ${tglCheckOutBaru}.`
+      : isBookingFee
+        ? " Status penghuni tetap Booking."
+        : "";
     const ok = await confirm({
-      title: "Konfirmasi payment deposit kamar?",
-      message: `${hitungText} Catat pembayaran deposit (nota ${noNota}) untuk ${row.namaLengkap}? Nominal di Finance mengikuti nilai input panel (${formatRpNumber(nominalNum)}). Status deposit ditandai lunas.`,
+      title: isBookingFee ? "Konfirmasi payment booking fee?" : "Konfirmasi payment deposit kamar?",
+      message: `${hitungText} Catat pembayaran ${isBookingFee ? "booking fee" : "deposit"} (nota ${noNota}) untuk ${row.namaLengkap}? Tanggal payment: ${paymentDate}. Nominal di Finance mengikuti nilai input panel (${formatRpNumber(nominalNum)}). Status ${isBookingFee ? "booking fee" : "deposit"} ditandai lunas.${stayNote}`,
       confirmLabel: "Ya, konfirmasi",
       cancelLabel: "Batal",
     });
@@ -2132,22 +2322,45 @@ export default function PenghuniPageClient({
       return;
     }
 
-    const tanggal = new Date().toISOString().slice(0, 10);
-    const keteranganFin = `Payment deposit kamar · ${row.unitBlok} / ${row.noKamar} · ${hitungText}`;
+    const tanggal = paymentDate;
+    const keteranganFin = `Payment ${isBookingFee ? "booking fee" : "deposit kamar"} · ${row.unitBlok} / ${row.noKamar} · ${hitungText} · Dibayar: ${paymentDate}`;
+    const financePos = isBookingFee ? FINANCE_POS_BOOKING_FEE : FINANCE_POS_DEPOSIT_KAMAR;
+    const stayPatch = willPromote
+      ? {
+          status: "Stay" as PenghuniStatus,
+          tglCheckOut: tglCheckOutBaru,
+          sewaCycleStart: activeCycleStart!,
+          sewaCycleEnd: tglCheckOutBaru,
+        }
+      : {};
 
     if (localDemoMode) {
       const updatedPen = data.map((p) =>
-        p.id === row.id ? { ...p, depositKamarPaid: true, depositKamarNota: noNota } : p
+        p.id === row.id
+          ? {
+              ...p,
+              ...(isBookingFee
+                ? { bookingFeePaid: true, bookingFeeNota: noNota }
+                : { depositKamarPaid: true, depositKamarNota: noNota }),
+              ...stayPatch,
+            }
+          : p
       );
       setData(updatedPen);
       persistPenghuniSandbox(updatedPen, historyData);
-      setPenghuniProfileRow({ ...row, depositKamarPaid: true, depositKamarNota: noNota });
+      setPenghuniProfileRow({
+        ...row,
+        ...(isBookingFee
+          ? { bookingFeePaid: true, bookingFeeNota: noNota }
+          : { depositKamarPaid: true, depositKamarNota: noNota }),
+        ...stayPatch,
+      });
       const fin = readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
       const finRow: FinanceRow = {
         id: newSandboxId(),
         noNota,
         kategori: "Pemasukan",
-        pos: FINANCE_POS_DEPOSIT_KAMAR,
+        pos: financePos,
         tanggal,
         namaPenghuni: row.namaLengkap,
         lokasiKos: row.lokasiKos,
@@ -2162,7 +2375,7 @@ export default function PenghuniPageClient({
       const { error: finErr } = await supabase.from("finance").insert({
         no_nota: noNota,
         kategori: "Pemasukan",
-        pos: FINANCE_POS_DEPOSIT_KAMAR,
+        pos: financePos,
         tanggal,
         nama_penghuni: row.namaLengkap,
         nominal: nominalNum,
@@ -2174,22 +2387,39 @@ export default function PenghuniPageClient({
         toast(finErr.message, "error");
         return;
       }
-      const { error: penErr } = await supabase
-        .from("penghuni")
-        .update({ deposit_kamar_paid: true, deposit_kamar_nota: noNota })
-        .eq("id", row.id);
+      const penUpdate: Record<string, unknown> = isBookingFee
+        ? { booking_fee_paid: true, booking_fee_nota: noNota }
+        : { deposit_kamar_paid: true, deposit_kamar_nota: noNota };
+      if (willPromote) {
+        penUpdate.status = "Stay";
+        penUpdate.tgl_check_out = tglCheckOutBaru;
+        penUpdate.sewa_cycle_start = activeCycleStart;
+        penUpdate.sewa_cycle_end = tglCheckOutBaru;
+      }
+      const { error: penErr } = await supabase.from("penghuni").update(penUpdate).eq("id", row.id);
       if (penErr) {
         toast(penErr.message, "error");
         return;
       }
       await loadPenghuni();
       setPenghuniProfileRow((prev) =>
-        prev && prev.id === row.id ? { ...prev, depositKamarPaid: true, depositKamarNota: noNota } : prev
+        prev && prev.id === row.id
+          ? {
+              ...prev,
+              ...(isBookingFee
+                ? { bookingFeePaid: true, bookingFeeNota: noNota }
+                : { depositKamarPaid: true, depositKamarNota: noNota }),
+              ...stayPatch,
+            }
+          : prev
       );
     }
 
     setShowDepositPaymentPanel(false);
-    toast(`${hitungText} Payment deposit kamar berhasil dicatat.`, "success");
+    toast(
+      `${hitungText} Payment ${isBookingFee ? "booking fee" : "deposit kamar"} berhasil dicatat.`,
+      "success"
+    );
   };
 
   const closePenghuniModal = () => {
@@ -2286,12 +2516,13 @@ export default function PenghuniPageClient({
               <button
                 type="button"
                 onClick={togglePenghuniBaru}
-                className={`btn-tactile btn-tactile-soft rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
+                className={`btn-tactile btn-tactile-soft inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
                   showPenghuniForm
                     ? "border-[#4a3624] bg-[#5c4330] text-[#fff8eb] ring-2 ring-[#c09c70]/50 dark:border-[#c9a574] dark:bg-[#3d2d1f] dark:text-[#f0dcc4]"
                     : "border-[#a67c48] bg-[#c49a6a] text-white hover:border-[#3d2a18] hover:bg-[#3d2918] hover:text-[#fff8eb] dark:border-[#7a5c3a] dark:bg-[#5c452d] dark:text-[#f5e8d4] dark:hover:border-[#2a1810] dark:hover:bg-[#1f140e]"
                 }`}
               >
+                <UserPlus size={14} aria-hidden />
                 Penghuni Baru
               </button>
               <RefreshToolbarButton onRefresh={handleRefreshPenghuni} disabled={isLoading} />
@@ -2300,7 +2531,8 @@ export default function PenghuniPageClient({
 
           <div className="mb-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3 md:items-end">
             <div className="flex min-w-0 flex-col">
-              <label className="mb-1 block text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+              <label className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                <MapPin size={12} aria-hidden className="opacity-70" />
                 Filter Lokasi
               </label>
               <select
@@ -2320,7 +2552,8 @@ export default function PenghuniPageClient({
               </select>
             </div>
             <div className="flex min-w-0 flex-col">
-              <label className="mb-1 block text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+              <label className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                <Building2 size={12} aria-hidden className="opacity-70" />
                 Filter Blok/Unit
               </label>
               <select
@@ -2358,6 +2591,44 @@ export default function PenghuniPageClient({
             </div>
           </div>
 
+          <div
+            className="mb-3 flex flex-wrap gap-2"
+            role="tablist"
+            aria-label="Filter status penghuni"
+          >
+            {PENGHUNI_STATUS_FILTER_OPTIONS.map((opt) => {
+              const active = penghuniStatusFilter === opt.value;
+              const count = penghuniStatusFilterCounts[opt.value];
+              const Icon = opt.icon;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setPenghuniStatusFilter(opt.value)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                    active
+                      ? "border-[#5c4330] bg-[#5c4330] text-[#fff8eb] shadow-sm dark:border-[#c9a574] dark:bg-[#3d2d1f] dark:text-[#f0dcc4]"
+                      : "border-[#dcc7aa] bg-[#fffdf9] text-[#6d5232] hover:border-[#b8956a] hover:bg-[#f6efe4] dark:border-[#4d3925] dark:bg-[#2b2016] dark:text-[#d9bb94] dark:hover:bg-[#33261b]"
+                  }`}
+                >
+                  <Icon size={13} aria-hidden />
+                  <span>{opt.label}</span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                      active
+                        ? "bg-white/20 text-[#fff8eb]"
+                        : "bg-[#efe2d1] text-[#6d5232] dark:bg-[#3d2f22] dark:text-[#d9bb94]"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           <div className="mb-4 max-h-[min(320px,45vh)] isolate overflow-y-auto rounded-2xl border border-[#eadcc9] dark:border-[#3d2f22]">
             <table className="min-w-full text-left text-sm">
               <thead className="sticky top-0 z-30 text-xs uppercase tracking-[0.12em] text-[#8f724d] dark:text-[#c8a97f]">
@@ -2380,16 +2651,25 @@ export default function PenghuniPageClient({
                       Memuat…
                     </td>
                   </tr>
-                ) : sortedByCheckOut.length === 0 ? (
+                ) : displayedPenghuniRows.length === 0 ? (
                   <tr>
                     <td className="px-3 py-4 text-[#856948]" colSpan={7}>
-                      Belum ada penghuni (Booking/Stay) untuk filter ini.
+                      {penghuniStatusFilter === "History"
+                        ? "Belum ada penghuni di history untuk filter ini."
+                        : penghuniStatusFilter === "Booking"
+                          ? "Belum ada penghuni Booking untuk filter ini."
+                          : penghuniStatusFilter === "Stay"
+                            ? "Belum ada penghuni Stay untuk filter ini."
+                            : "Belum ada penghuni (Booking/Stay) untuk filter ini."}
                     </td>
                   </tr>
                 ) : (
-                  sortedByCheckOut.map((row) => {
+                  displayedPenghuniRows.map((row) => {
+                    const isHistoryRow = row.status === "History";
                     const isPublicBooking = row.bookingSource === "public_form";
-                    const rowTone = isPenghuniSewaOverdue(row)
+                    const rowTone = isHistoryRow
+                      ? "text-zinc-700 dark:text-zinc-200"
+                      : isPenghuniSewaOverdue(row)
                       ? "border-l-[5px] border-l-red-900 bg-red-300/95 text-[#450a0a] dark:border-l-red-400 dark:bg-red-900/70 dark:text-red-50"
                       : penghuniHasOutstandingPayments(row)
                         ? "border-l-[3px] border-l-amber-500 bg-amber-50/90 text-[#78350f] dark:border-l-amber-400 dark:bg-amber-950/35 dark:text-amber-50"
@@ -2442,32 +2722,36 @@ export default function PenghuniPageClient({
                       <td className="px-3 py-2">{row.tglCheckIn || "—"}</td>
                       <td className="px-3 py-2">{row.tglCheckOut || "—"}</td>
                       <td className="px-3 py-2 align-middle">
-                        <div className="relative z-0 flex flex-wrap gap-1">
-                          {canEditPenghuni ? (
-                            <ActionButtonWithIcon
-                              icon={Pencil}
-                              onClick={() => handleEdit(row)}
-                              label="Edit"
-                              className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white"
-                            />
-                          ) : null}
-                          {canDeletePenghuni ? (
-                            <ActionButtonWithIcon
-                              icon={Trash2}
-                              onClick={() => void deletePenghuniWithConfirm(row)}
-                              label="Hapus"
-                              className="rounded-full bg-red-600 px-2 py-1 text-[10px] font-semibold text-white"
-                            />
-                          ) : (
-                            <ActionButtonWithIcon
-                              icon={CreditCard}
-                              onClick={() => openSettlementPanel(row)}
-                              disabled={!penghuniHasOutstandingPayments(row)}
-                              label="Settlement"
-                              className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            />
-                          )}
-                        </div>
+                        {isHistoryRow ? (
+                          <span className="text-[10px] text-[#8b6d48] dark:text-[#b79a78]">Double klik profil</span>
+                        ) : (
+                          <div className="relative z-0 flex flex-wrap gap-1">
+                            {canEditPenghuni ? (
+                              <ActionButtonWithIcon
+                                icon={Pencil}
+                                onClick={() => handleEdit(row)}
+                                label="Edit"
+                                className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white"
+                              />
+                            ) : null}
+                            {canDeletePenghuni ? (
+                              <ActionButtonWithIcon
+                                icon={Trash2}
+                                onClick={() => void deletePenghuniWithConfirm(row)}
+                                label="Hapus"
+                                className="rounded-full bg-red-600 px-2 py-1 text-[10px] font-semibold text-white"
+                              />
+                            ) : (
+                              <ActionButtonWithIcon
+                                icon={CreditCard}
+                                onClick={() => openSettlementPanel(row)}
+                                disabled={!penghuniHasOutstandingPayments(row)}
+                                label="Settlement"
+                                className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              />
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                     );
@@ -2489,10 +2773,19 @@ export default function PenghuniPageClient({
             </p>
           )}
 
+          {penghuniStatusFilter !== "History" ? (
           <div className="mt-6 border-t border-[#e5d8c4] pt-5 dark:border-[#3d2f22]">
             <p className="text-xs uppercase tracking-[0.22em] text-[#8b6d48] dark:text-[#b79a78]">History penghuni</p>
             <p className="mt-1 text-xs text-[#7f6344] dark:text-[#b79a78]">
-              Penghuni yang sudah check out. Double klik baris untuk melihat profil arsip.
+              Penghuni yang sudah check out. Double klik baris untuk melihat profil arsip. Atau buka tab{" "}
+              <button
+                type="button"
+                onClick={() => setPenghuniStatusFilter("History")}
+                className="font-semibold text-[#5c4330] underline-offset-2 hover:underline dark:text-[#d9bb94]"
+              >
+                History
+              </button>
+              .
             </p>
             <div className="mt-3 max-h-[min(280px,35vh)] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-700">
               <table className="min-w-full text-left text-sm">
@@ -2531,6 +2824,7 @@ export default function PenghuniPageClient({
               </table>
             </div>
           </div>
+          ) : null}
       </article>
 
       <article className="rounded-[2rem] border border-violet-200/80 bg-gradient-to-b from-[#f3f1ff]/95 to-white/95 p-6 shadow-[0_20px_50px_-35px_rgba(63,79,157,0.35)] dark:border-[#424a80] dark:from-[#1f2344] dark:to-[#1b1f3d]/95">
@@ -2553,12 +2847,13 @@ export default function PenghuniPageClient({
             <button
               type="button"
               onClick={toggleSurveyBaru}
-              className={`btn-tactile rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
+              className={`btn-tactile inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
                 showSurveyForm
                   ? "border-amber-800 bg-amber-900 text-amber-50 ring-2 ring-amber-500/40 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-100"
                   : "border-amber-600 bg-amber-500 text-amber-950 hover:border-amber-900 hover:bg-amber-800 hover:text-amber-50 dark:border-amber-500 dark:bg-amber-600 dark:text-amber-950 dark:hover:border-amber-300 dark:hover:bg-amber-800 dark:hover:text-amber-50"
               }`}
             >
+              <ClipboardPlus size={14} aria-hidden />
               Survey Baru
             </button>
             <RefreshToolbarButton onRefresh={handleRefreshPenghuni} disabled={isLoading} />
@@ -2802,6 +3097,7 @@ export default function PenghuniPageClient({
                         onClick={openExtendStayPanel}
                         className="btn-tactile inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-100 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
                       >
+                        <CalendarPlus size={13} aria-hidden />
                         Extend stay
                       </button>
                     ) : null}
@@ -2810,6 +3106,7 @@ export default function PenghuniPageClient({
                       onClick={() => void handleCheckoutPenghuni()}
                       className="inline-flex items-center gap-2 rounded-lg border border-red-400 bg-red-600 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-red-700 dark:border-red-600 dark:bg-red-700 dark:hover:bg-red-800"
                     >
+                      <LogOut size={13} aria-hidden />
                       Check out
                     </button>
                   </div>
@@ -2844,9 +3141,41 @@ export default function PenghuniPageClient({
             </div>
 
             <div className="mt-6 grid gap-4 border-t border-[#e5d8c4] pt-6 dark:border-[#3d2f22]">
+              {penghuniProfileRow.status === "Booking" ? (
+                <div className="relative">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                    Booking fee (DP sewa)
+                  </p>
+                  <div
+                    className={`relative mt-1 rounded-xl border-2 px-3 py-2.5 transition ${
+                      penghuniProfileRow.bookingFeePaid
+                        ? "border-violet-500 bg-violet-50/95 dark:border-violet-500 dark:bg-violet-950/40"
+                        : "border-transparent"
+                    }`}
+                  >
+                    <p
+                      className={`text-lg font-semibold ${
+                        penghuniProfileRow.bookingFeePaid
+                          ? "text-violet-700 dark:text-violet-300"
+                          : "text-[#2c2218] dark:text-[#f5e8d4]"
+                      }`}
+                    >
+                      {profilePanelDerived.bookingFeeFormatted}
+                    </p>
+                    {penghuniProfileRow.bookingFeePaid ? (
+                      <span
+                        className="pointer-events-none absolute -right-1 -top-2 rotate-[-8deg] rounded-md border-2 border-violet-800 bg-white px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-violet-800 shadow-sm dark:bg-violet-100"
+                        aria-hidden
+                      >
+                        PAID
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="relative">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
-                  {penghuniProfileRow.status === "Booking" ? "Booking fee" : profilePanelDerived.depositLabel}
+                  {profilePanelDerived.depositLabel}
                 </p>
                 <div
                   className={`relative mt-1 rounded-xl border-2 px-3 py-2.5 transition ${
@@ -2877,19 +3206,22 @@ export default function PenghuniPageClient({
               {penghuniProfileRow.status === "Booking" && profilePanelDerived.sisaPembayaranBookingFormatted ? (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
-                    Sisa pembayaran
+                    Sisa pembayaran ke Stay
                   </p>
                   <p className="mt-1 text-lg font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
                     {profilePanelDerived.sisaPembayaranBookingFormatted}
                   </p>
                   <p className="mt-1 text-xs text-[#6e5336] dark:text-[#bfa27f]">
-                    (Harga bulanan × periode sewa) − booking fee
+                    Sisa sewa ({profilePanelDerived.sisaSewaFormatted}) + deposit kamar
                   </p>
                 </div>
               ) : null}
-              {penghuniProfileRow.status === "Stay" ? (
+              {penghuniProfileRow.status === "Stay" ||
+              (penghuniProfileRow.status === "Booking" && penghuniProfileRow.bookingFeePaid) ? (
                 <div className="relative">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">Harga sewa kamar</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                    {penghuniProfileRow.status === "Booking" ? "Sisa harga sewa kamar" : "Harga sewa kamar"}
+                  </p>
                   <div
                     className={`relative mt-1 rounded-xl border-2 px-3 py-2.5 transition ${
                       penghuniProfileRow.sewaKamarPaid
@@ -2904,10 +3236,13 @@ export default function PenghuniPageClient({
                           : "text-[#2c2218] dark:text-[#f5e8d4]"
                       }`}
                     >
-                      {profilePanelDerived.sewaFormatted}
+                      {penghuniProfileRow.status === "Booking"
+                        ? profilePanelDerived.sisaSewaFormatted
+                        : profilePanelDerived.sewaFormatted}
                     </p>
                     <p className="mt-1 text-xs text-[#6e5336] dark:text-[#bfa27f]">
                       {profilePanelDerived.hargaBulanFormatted} × {profilePanelDerived.periodeBulan} bulan
+                      {penghuniProfileRow.status === "Booking" ? " − booking fee" : ""}
                     </p>
                     {penghuniProfileRow.sewaKamarPaid ? (
                       <span
@@ -2944,13 +3279,13 @@ export default function PenghuniPageClient({
                   <button
                     type="button"
                     disabled={
-                      Boolean(penghuniProfileRow.depositKamarPaid) ||
+                      Boolean(penghuniProfileRow.bookingFeePaid) ||
                       parseRupiahToNumber(penghuniProfileRow.bookingFee) <= 0
                     }
-                    onClick={openDepositPaymentPanel}
+                    onClick={openBookingFeePaymentPanel}
                     className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Wallet size={18} aria-hidden />
+                    <Ticket size={18} aria-hidden />
                     Payment Booking
                   </button>
                   <button
@@ -2958,13 +3293,27 @@ export default function PenghuniPageClient({
                     disabled={
                       Boolean(penghuniProfileRow.sewaKamarPaid) ||
                       !getActiveSewaCycleStart(penghuniProfileRow) ||
-                      Math.max(0, Math.floor(Number(penghuniProfileRow.periodeSewa) || 0)) <= 0
+                      Math.max(0, Math.floor(Number(penghuniProfileRow.periodeSewa) || 0)) <= 0 ||
+                      (parseRupiahToNumber(penghuniProfileRow.bookingFee) > 0 &&
+                        !penghuniProfileRow.bookingFeePaid)
                     }
                     onClick={openSewaPaymentPanel}
                     className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <CreditCard size={18} aria-hidden />
+                    <HandCoins size={18} aria-hidden />
                     Payment sewa kamar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      Boolean(penghuniProfileRow.depositKamarPaid) ||
+                      parseRupiahToNumber(penghuniProfileRow.depositKamar) <= 0
+                    }
+                    onClick={openDepositPaymentPanel}
+                    className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-700 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Landmark size={18} aria-hidden />
+                    Payment deposit kamar
                   </button>
                 </>
               ) : penghuniProfileRow.status === "Stay" ? (
@@ -2975,19 +3324,19 @@ export default function PenghuniPageClient({
                     onClick={openSewaPaymentPanel}
                     className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <CreditCard size={18} aria-hidden />
+                    <HandCoins size={18} aria-hidden />
                     Payment sewa kamar
                   </button>
                   <button
                     type="button"
                     disabled={
                       Boolean(penghuniProfileRow.depositKamarPaid) ||
-                      parseRupiahToNumber(penghuniProfileRow.bookingFee) <= 0
+                      parseRupiahToNumber(penghuniProfileRow.depositKamar) <= 0
                     }
                     onClick={openDepositPaymentPanel}
                     className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Wallet size={18} aria-hidden />
+                    <Landmark size={18} aria-hidden />
                     Payment deposit kamar
                   </button>
                 </>
@@ -3002,8 +3351,9 @@ export default function PenghuniPageClient({
                 setShowDepositPaymentPanel(false);
                 setPenghuniProfileRow(null);
               }}
-              className="mt-4 self-end rounded-full border border-[#d5be9e] px-4 py-2 text-xs font-semibold text-[#6d5232] transition hover:bg-[#efe2d1] dark:border-[#4f3b2a] dark:text-[#d9bb94] dark:hover:bg-[#33261b]"
+              className="mt-4 inline-flex items-center gap-1.5 self-end rounded-full border border-[#d5be9e] px-4 py-2 text-xs font-semibold text-[#6d5232] transition hover:bg-[#efe2d1] dark:border-[#4f3b2a] dark:text-[#d9bb94] dark:hover:bg-[#33261b]"
             >
+              <X size={14} aria-hidden />
               Tutup
             </button>
           </div>
@@ -3166,7 +3516,7 @@ export default function PenghuniPageClient({
               onClick={() => void handleSewaPaymentSekarang()}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <CreditCard size={18} aria-hidden />
+              <CheckCircle2 size={18} aria-hidden />
               Payment sekarang
             </button>
           </div>
@@ -3251,16 +3601,18 @@ export default function PenghuniPageClient({
             <button
               type="button"
               onClick={() => setShowExtendStayPanel(false)}
-              className="rounded-xl border border-[#d5be9e] px-3 py-2 text-xs font-semibold text-[#6d5232] transition hover:bg-[#efe2d1] dark:border-[#4f3b2a] dark:text-[#d9bb94] dark:hover:bg-[#33261b]"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[#d5be9e] px-3 py-2 text-xs font-semibold text-[#6d5232] transition hover:bg-[#efe2d1] dark:border-[#4f3b2a] dark:text-[#d9bb94] dark:hover:bg-[#33261b]"
             >
+              <X size={13} aria-hidden />
               Batal
             </button>
             <button
               type="button"
               disabled={isSubmittingExtendStay}
               onClick={() => void handleSubmitExtendStay()}
-              className="rounded-xl bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-red-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
+              <CalendarPlus size={13} aria-hidden />
               Simpan Extend Stay
             </button>
           </div>
@@ -3288,13 +3640,19 @@ export default function PenghuniPageClient({
           <div className="flex items-start justify-between gap-3 border-b border-[#eadcc9] p-5 dark:border-[#3d2f22]">
             <div className="flex items-start gap-3">
               <span className="mt-0.5 rounded-xl bg-violet-100 p-2 text-violet-800 dark:bg-violet-900/50 dark:text-violet-200">
-                <Wallet size={22} aria-hidden />
+                {depositPaymentKind === "booking_fee" ? (
+                  <Ticket size={22} aria-hidden />
+                ) : (
+                  <Landmark size={22} aria-hidden />
+                )}
               </span>
               <div>
                 <p id="deposit-payment-panel-title" className="text-xs uppercase tracking-[0.2em] text-[#9d7e55] dark:text-[#cfb089]">
                   Input payment
                 </p>
-                <h2 className="mt-1 text-lg font-semibold text-[#2c2218] dark:text-[#f5e8d4]">deposit kamar</h2>
+                <h2 className="mt-1 text-lg font-semibold text-[#2c2218] dark:text-[#f5e8d4]">
+                  {depositPaymentKind === "booking_fee" ? "booking fee" : "deposit kamar"}
+                </h2>
                 <p className="mt-1 text-sm text-[#6e5336] dark:text-[#bfa27f]">{penghuniProfileRow.namaLengkap}</p>
               </div>
             </div>
@@ -3321,7 +3679,7 @@ export default function PenghuniPageClient({
               <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">POS</span>
               <input
                 readOnly
-                value={FINANCE_POS_DEPOSIT_KAMAR}
+                value={depositPaymentKind === "booking_fee" ? FINANCE_POS_BOOKING_FEE : FINANCE_POS_DEPOSIT_KAMAR}
                 className="mt-1 w-full rounded-xl border border-[#d5be9e] bg-[#f3ebe0] px-3 py-2.5 text-[#2c2218] dark:border-[#4f3b2a] dark:bg-[#2a2018] dark:text-[#f5e8d4]"
               />
             </label>
@@ -3379,6 +3737,18 @@ export default function PenghuniPageClient({
               ) : null}
             </label>
             <label className="block text-sm">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                Tanggal payment <span className="text-red-600 dark:text-red-400">*</span>
+              </span>
+              <input
+                type="date"
+                required
+                value={depositPaymentTanggal}
+                onChange={(e) => setDepositPaymentTanggal(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-[#d5be9e] bg-white px-3 py-2.5 text-[#2c2218] outline-none ring-violet-500/30 focus:ring-2 dark:border-[#4f3b2a] dark:bg-[#1f1710] dark:text-[#f5e8d4]"
+              />
+            </label>
+            <label className="block text-sm">
               <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">Nominal (Rp)</span>
               <input
                 type="text"
@@ -3392,8 +3762,8 @@ export default function PenghuniPageClient({
             </label>
             {depositPaymentDerived ? (
               <p className="rounded-xl border border-violet-200/80 bg-violet-50/80 px-3 py-2 text-xs text-violet-950 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-100">
-                <span className="font-semibold">Perhitungan (saat Payment sekarang):</span> nominal input − referensi deposit
-                profil (booking fee / deposit di data penghuni) = selisih.
+                <span className="font-semibold">Perhitungan (saat Payment sekarang):</span> nominal input − referensi{" "}
+                {depositPaymentKind === "booking_fee" ? "booking fee" : "deposit"} profil = selisih.
                 <br />
                 {formatRpNumber(depositPaymentDerived.nominalInput)} −{" "}
                 {formatRpNumber(depositPaymentDerived.referensiProfil)} ={" "}
@@ -3402,6 +3772,11 @@ export default function PenghuniPageClient({
             ) : null}
             <p className="text-xs text-[#6e5336] dark:text-[#bfa27f]">
               Referensi: {penghuniProfileRow.lokasiKos || "—"} · {penghuniProfileRow.unitBlok} / {penghuniProfileRow.noKamar}
+              {depositPaymentKind === "booking_fee"
+                ? " · Setelah lunas, status tetap Booking."
+                : penghuniProfileRow.status === "Booking"
+                  ? " · Stay otomatis jika sewa juga sudah lunas."
+                  : ""}
             </p>
           </div>
 
@@ -3412,7 +3787,7 @@ export default function PenghuniPageClient({
               onClick={() => void handleDepositPaymentSekarang()}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Wallet size={18} aria-hidden />
+              <CheckCircle2 size={18} aria-hidden />
               Payment sekarang
             </button>
           </div>
@@ -3585,13 +3960,13 @@ export default function PenghuniPageClient({
                       handleInputChange("hargaBulanan", formatRupiahInput(event.target.value))
                     }
                     className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] py-2.5 pl-12 pr-4 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
-                    placeholder="1.800.000"
+                    placeholder="1.300.000"
                   />
                 </div>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-[0.18em] text-[#8b6d48]">
-                  {form.status === "Stay" ? "Deposit Kamar" : "Booking Fee"}
+                  Booking Fee (DP sewa)
                 </label>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#8f734f]">
@@ -3607,10 +3982,35 @@ export default function PenghuniPageClient({
                     placeholder="0"
                   />
                 </div>
+                <p className="mt-1 text-[10px] text-[#8b6d48] dark:text-[#b79a78]">
+                  Uang muka yang mengurangi total sewa (bukan deposit kamar).
+                </p>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-[0.18em] text-[#8b6d48]">
+                  Deposit Kamar
+                </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#8f734f]">
+                    Rp
+                  </span>
+                  <input
+                    inputMode="numeric"
+                    value={form.depositKamar}
+                    onChange={(event) =>
+                      handleInputChange("depositKamar", formatRupiahInput(event.target.value))
+                    }
+                    className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] py-2.5 pl-12 pr-4 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
+                    placeholder="500.000"
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-[#8b6d48] dark:text-[#b79a78]">
+                  Bisa diubah selama status masih Booking.
+                </p>
               </div>
               <div className="md:col-span-2">
                 <label className="mb-1 block text-xs font-medium uppercase tracking-[0.18em] text-[#8b6d48]">
-                  {form.status === "Stay" ? "TOTAL PEMBAYARAN" : "Sisa Pembayaran"}
+                  {form.status === "Stay" ? "TOTAL PEMBAYARAN" : "Sisa Pembayaran ke Stay"}
                 </label>
                 <div className="flex w-full items-center rounded-2xl border border-[#dcc7aa] bg-[#f5efe6] px-4 py-2.5 text-sm font-medium text-[#2c2218] dark:border-[#4d3925] dark:bg-[#2b2016] dark:text-[#f5e8d4]">
                   {pembayaranRingkasanDisplay}
@@ -3618,7 +4018,7 @@ export default function PenghuniPageClient({
                 <p className="mt-1 text-[10px] text-[#8b6d48] dark:text-[#b79a78]">
                   {form.status === "Stay"
                     ? "Dihitung: (Harga Bulanan × Periode Sewa) + Deposit Kamar"
-                    : "Dihitung: (Harga Bulanan × Periode Sewa) − Booking Fee"}
+                    : "Dihitung: (Harga Bulanan × Periode Sewa − Booking Fee) + Deposit Kamar"}
                 </p>
               </div>
               <div className="md:col-span-2">

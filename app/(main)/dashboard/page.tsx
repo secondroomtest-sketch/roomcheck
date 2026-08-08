@@ -6,11 +6,16 @@ import {
   BadgeDollarSign,
   BedDouble,
   Bell,
+  Bookmark,
   Building2,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   LayoutGrid,
+  LogOut,
   PieChart,
   Receipt,
   TrendingUp,
@@ -199,11 +204,11 @@ function addCalendarMonthsYm(ym: string, deltaMonths: number): string {
 }
 
 const PENGHUNI_LIST_FILTER_OPTIONS = [
-  { value: "semua", label: "SEMUA PENGHUNI" },
-  { value: "hampir7", label: "CHECK OUT H-1 S/D H-7" },
-  { value: "telatBayar", label: "DAFTAR TELAT BAYAR" },
-  { value: "checkoutLewat", label: "DAFTAR PENGHUNI CHECK OUT" },
-  { value: "booking", label: "DAFTAR PENGHUNI BOOKING" },
+  { value: "semua", label: "Semua", icon: Users },
+  { value: "hampir7", label: "H-1 s/d H-7", icon: Bell },
+  { value: "telatBayar", label: "Telat bayar", icon: AlertTriangle },
+  { value: "checkoutLewat", label: "Check out", icon: LogOut },
+  { value: "booking", label: "Booking", icon: Bookmark },
 ] as const;
 
 /** Tema interaktif bergilir — dashboard khusus role owner. */
@@ -612,6 +617,7 @@ export default function DashboardPage() {
       tglCheckOut: String(row.tgl_check_out ?? ""),
       hargaBulanan: String(row.harga_bulanan ?? ""),
       bookingFee: String(row.booking_fee ?? ""),
+      depositKamar: String(row.deposit_kamar ?? ""),
       noWa: String(row.no_wa ?? ""),
       status: (() => {
         const s = String(row.status ?? "").trim().toLowerCase();
@@ -1181,7 +1187,7 @@ export default function DashboardPage() {
                     aria-label="Bulan sebelumnya"
                     onClick={() => setOwnerPnlMonth((m) => addCalendarMonthsYm(m, -1))}
                   >
-                    ‹
+                    <ChevronLeft size={18} aria-hidden />
                   </button>
                   <input
                     type="month"
@@ -1195,13 +1201,14 @@ export default function DashboardPage() {
                     aria-label="Bulan berikutnya"
                     onClick={() => setOwnerPnlMonth((m) => addCalendarMonthsYm(m, 1))}
                   >
-                    ›
+                    <ChevronRight size={18} aria-hidden />
                   </button>
                   <button
                     type="button"
                     onClick={() => setOwnerPnlMonth(defaultPnlCalendarYm())}
-                    className="touch-manipulation min-h-[2.75rem] rounded-full border border-[#7c9fff]/80 bg-gradient-to-r from-[#e8edff] to-[#f2e8ff] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#3d4a8f] shadow-sm transition hover:brightness-105 active:scale-[0.98] dark:border-[#5c6ba3] dark:from-[#252b48] dark:to-[#2a2450] dark:text-[#c8d4ff] sm:min-h-0 sm:px-3"
+                    className="touch-manipulation inline-flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded-full border border-[#7c9fff]/80 bg-gradient-to-r from-[#e8edff] to-[#f2e8ff] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#3d4a8f] shadow-sm transition hover:brightness-105 active:scale-[0.98] dark:border-[#5c6ba3] dark:from-[#252b48] dark:to-[#2a2450] dark:text-[#c8d4ff] sm:min-h-0 sm:px-3"
                   >
+                    <CalendarDays size={14} aria-hidden />
                     Bulan ini
                   </button>
                 </div>
@@ -1690,18 +1697,33 @@ export default function DashboardPage() {
               className="text-[#2d2217] dark:text-[#f6e9d5]"
               iconClassName={iconTone.brand}
             />
-            <select
-              value={penghuniListFilter}
-              onChange={(event) => setPenghuniListFilter(event.target.value as PenghuniListFilter)}
-              className="touch-manipulation min-h-[2.75rem] w-full max-w-none rounded-full border border-[#dac3a5] bg-[#fdf9f2] px-4 py-2 text-base font-semibold uppercase tracking-[0.08em] text-[#6e5336] outline-none ring-[#bb986e] focus:ring-2 dark:border-[#56422e] dark:bg-[#2a2016] dark:text-[#d9bc95] sm:w-auto sm:max-w-[min(100%,22rem)] sm:text-xs sm:tracking-[0.12em]"
+            <div
+              className="flex w-full max-w-none flex-wrap gap-2 sm:max-w-[min(100%,28rem)] sm:justify-end"
+              role="tablist"
               aria-label="Filter daftar penghuni"
             >
-              {PENGHUNI_LIST_FILTER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              {PENGHUNI_LIST_FILTER_OPTIONS.map((opt) => {
+                const active = penghuniListFilter === opt.value;
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setPenghuniListFilter(opt.value)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+                      active
+                        ? "border-[#5c4330] bg-[#5c4330] text-[#fff8eb] shadow-sm dark:border-[#c9a574] dark:bg-[#3d2d1f] dark:text-[#f0dcc4]"
+                        : "border-[#dac3a5] bg-[#fdf9f2] text-[#6e5336] hover:border-[#b89468] hover:bg-[#f6efe4] dark:border-[#56422e] dark:bg-[#2a2016] dark:text-[#d9bc95] dark:hover:bg-[#33261b]"
+                    }`}
+                  >
+                    <Icon size={13} aria-hidden />
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {checkoutNoticeEntries.length > 0 ? (

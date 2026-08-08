@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "@/libsupabaseClient";
-import { Ban, FileText, HandCoins, Plus, ReceiptText, Save, Search, X } from "lucide-react";
+import { Ban, Eye, FileText, HandCoins, Plus, ReceiptText, RotateCcw, Save, Search, X } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
@@ -27,6 +27,7 @@ import {
   clearPenghuniPaymentLinkedToFinanceRow,
   countFinanceRowsWithSameNotaAndPosKind,
   FINANCE_POS_SEWA_KAMAR,
+  isBookingFeeFinancePos,
   isDepositFinancePos,
   isSewaKamarFinancePos,
 } from "@/lib/penghuni-finance-payment-sync";
@@ -1453,6 +1454,8 @@ export default function FinancePageClient({
           return (
             Boolean(o.sewaKamarPaid) !== Boolean(p.sewaKamarPaid) ||
             String(o.sewaKamarNota ?? "") !== String(p.sewaKamarNota ?? "") ||
+            Boolean(o.bookingFeePaid) !== Boolean(p.bookingFeePaid) ||
+            String(o.bookingFeeNota ?? "") !== String(p.bookingFeeNota ?? "") ||
             Boolean(o.depositKamarPaid) !== Boolean(p.depositKamarPaid) ||
             String(o.depositKamarNota ?? "") !== String(p.depositKamarNota ?? "")
           );
@@ -1484,6 +1487,11 @@ export default function FinancePageClient({
             .from("penghuni")
             .update({ sewa_kamar_paid: false, sewa_kamar_nota: null })
             .eq("sewa_kamar_nota", nota);
+        } else if (isBookingFeeFinancePos(row.pos)) {
+          await supabase
+            .from("penghuni")
+            .update({ booking_fee_paid: false, booking_fee_nota: null })
+            .eq("booking_fee_nota", nota);
         } else if (isDepositFinancePos(row.pos)) {
           await supabase
             .from("penghuni")
@@ -1824,15 +1832,17 @@ export default function FinancePageClient({
                   type="button"
                   onClick={handleApplyRiwayatDates}
                   disabled={financeDraftDateInvalid || filterRiwayatBusy}
-                  className="btn-tactile inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55 sm:min-w-[8.5rem] sm:flex-none sm:rounded-full xl:flex-initial"
+                  className="btn-tactile inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#4d6dff] to-[#6d32ff] px-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#eef3ff] shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55 sm:min-w-[8.5rem] sm:flex-none sm:rounded-full xl:flex-initial"
                 >
+                  <Eye size={14} aria-hidden className="shrink-0" />
                   {filterRiwayatBusy ? "Memuat…" : "Tampilkan"}
                 </button>
                 <button
                   type="button"
                   onClick={handleResetRiwayatDates}
-                  className="btn-tactile btn-tactile-soft inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center rounded-xl border border-[#d5be9e] bg-white/90 px-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6d5232] transition hover:bg-[#faf5ef] dark:border-[#4f3b2a] dark:bg-[#2f2419] dark:text-[#d9bb94] dark:hover:bg-[#3d2f22] sm:flex-none sm:rounded-full xl:flex-initial"
+                  className="btn-tactile btn-tactile-soft inline-flex min-h-[44px] flex-1 touch-manipulation items-center justify-center gap-1.5 rounded-xl border border-[#d5be9e] bg-white/90 px-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6d5232] transition hover:bg-[#faf5ef] dark:border-[#4f3b2a] dark:bg-[#2f2419] dark:text-[#d9bb94] dark:hover:bg-[#3d2f22] sm:flex-none sm:rounded-full xl:flex-initial"
                 >
+                  <RotateCcw size={14} aria-hidden className="shrink-0" />
                   Reset semua tanggal
                 </button>
               </div>
