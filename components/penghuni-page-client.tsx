@@ -7,6 +7,7 @@ import {
   BedDouble,
   Bookmark,
   Building2,
+  CalendarDays,
   CalendarPlus,
   CheckCircle2,
   ClipboardList,
@@ -410,6 +411,8 @@ export default function PenghuniPageClient({
   const [selectedUnitFilter, setSelectedUnitFilter] = useState("Semua Blok/Unit");
   const [penghuniStatusFilter, setPenghuniStatusFilter] = useState<PenghuniStatusListFilter>("semua");
   const [penghuniListSearch, setPenghuniListSearch] = useState("");
+  const [penghuniCheckInFrom, setPenghuniCheckInFrom] = useState("");
+  const [penghuniCheckInTo, setPenghuniCheckInTo] = useState("");
   /** Tooltip keterangan baris tabel (fixed supaya tidak terpotong overflow). */
   const [hoverKeterangan, setHoverKeterangan] = useState<{
     id: string;
@@ -800,15 +803,27 @@ export default function PenghuniPageClient({
     });
   }, [filteredData, penghuniStatusFilter]);
 
+  const matchesCheckInRange = (tglCheckIn: string) => {
+    const from = String(penghuniCheckInFrom ?? "").trim().slice(0, 10);
+    const to = String(penghuniCheckInTo ?? "").trim().slice(0, 10);
+    if (!from && !to) return true;
+    const ci = String(tglCheckIn ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ci)) return false;
+    if (from && ci < from) return false;
+    if (to && ci > to) return false;
+    return true;
+  };
+
   const filteredPenghuniBySearch = useMemo(() => {
     const q = penghuniListSearch.trim().toLowerCase();
-    if (!q) return filteredPenghuniForList;
     return filteredPenghuniForList.filter((row) => {
+      if (!matchesCheckInRange(row.tglCheckIn)) return false;
+      if (!q) return true;
       const nama = (row.namaLengkap ?? "").toLowerCase();
       const checkIn = (row.tglCheckIn ?? "").toLowerCase();
       return nama.includes(q) || checkIn.includes(q);
     });
-  }, [filteredPenghuniForList, penghuniListSearch]);
+  }, [filteredPenghuniForList, penghuniListSearch, penghuniCheckInFrom, penghuniCheckInTo]);
 
   const sortedByCheckOut = useMemo(() => {
     const copy = [...filteredPenghuniBySearch];
@@ -827,13 +842,14 @@ export default function PenghuniPageClient({
 
   const filteredHistoryBySearch = useMemo(() => {
     const q = penghuniListSearch.trim().toLowerCase();
-    if (!q) return filteredHistoryData;
     return filteredHistoryData.filter((row) => {
+      if (!matchesCheckInRange(row.tglCheckIn)) return false;
+      if (!q) return true;
       const nama = (row.namaLengkap ?? "").toLowerCase();
       const checkIn = (row.tglCheckIn ?? "").toLowerCase();
       return nama.includes(q) || checkIn.includes(q);
     });
-  }, [filteredHistoryData, penghuniListSearch]);
+  }, [filteredHistoryData, penghuniListSearch, penghuniCheckInFrom, penghuniCheckInTo]);
 
   const sortedHistoryByCheckOut = useMemo(() => {
     const copy = [...filteredHistoryBySearch];
@@ -2468,7 +2484,7 @@ export default function PenghuniPageClient({
 
   return (
     <section className="space-y-6">
-      <div className="grid min-h-[calc(100vh-9rem)] grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="flex min-h-[calc(100vh-9rem)] flex-col gap-6">
         <article className={`rounded-[2rem] border bg-white/85 p-6 dark:bg-[#1f1710]/95 ${formAccent}`}>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -2530,7 +2546,7 @@ export default function PenghuniPageClient({
             </div>
           </div>
 
-          <div className="mb-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3 md:items-end">
+          <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 xl:items-end">
             <div className="flex min-w-0 flex-col">
               <label className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
                 <MapPin size={12} aria-hidden className="opacity-70" />
@@ -2570,9 +2586,35 @@ export default function PenghuniPageClient({
                 ))}
               </select>
             </div>
-            <div className="flex min-w-0 flex-col sm:col-span-2 md:col-span-1">
+            <div className="flex min-w-0 flex-col">
+              <label className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                <CalendarDays size={12} aria-hidden className="opacity-70" />
+                Check-in dari
+              </label>
+              <input
+                type="date"
+                value={penghuniCheckInFrom}
+                max={penghuniCheckInTo || undefined}
+                onChange={(e) => setPenghuniCheckInFrom(e.target.value)}
+                className="w-full min-h-[2.625rem] rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#c09c70] dark:border-[#4d3925] dark:bg-[#2b2016]"
+              />
+            </div>
+            <div className="flex min-w-0 flex-col">
+              <label className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
+                <CalendarDays size={12} aria-hidden className="opacity-70" />
+                Check-in sampai
+              </label>
+              <input
+                type="date"
+                value={penghuniCheckInTo}
+                min={penghuniCheckInFrom || undefined}
+                onChange={(e) => setPenghuniCheckInTo(e.target.value)}
+                className="w-full min-h-[2.625rem] rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#c09c70] dark:border-[#4d3925] dark:bg-[#2b2016]"
+              />
+            </div>
+            <div className="flex min-w-0 flex-col sm:col-span-2 lg:col-span-3 xl:col-span-1">
               <label className="mb-1 block text-xs uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">
-                Cari (nama / tgl check-in)
+                Cari nama
               </label>
               <div className="relative w-full">
                 <Search
@@ -2584,13 +2626,33 @@ export default function PenghuniPageClient({
                   type="search"
                   value={penghuniListSearch}
                   onChange={(e) => setPenghuniListSearch(e.target.value)}
-                  placeholder="Ketik nama atau tanggal…"
+                  placeholder="Ketik nama penghuni…"
                   className="w-full min-h-[2.625rem] rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] py-2.5 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-[#c09c70] dark:border-[#4d3925] dark:bg-[#2b2016]"
                   autoComplete="off"
                 />
               </div>
             </div>
           </div>
+          {(penghuniCheckInFrom || penghuniCheckInTo) ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <p className="text-[11px] text-[#7f6344] dark:text-[#b79a78]">
+                Filter check-in
+                {penghuniCheckInFrom ? ` dari ${penghuniCheckInFrom}` : ""}
+                {penghuniCheckInTo ? ` sampai ${penghuniCheckInTo}` : ""}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPenghuniCheckInFrom("");
+                  setPenghuniCheckInTo("");
+                }}
+                className="inline-flex items-center gap-1 rounded-full border border-[#dcc7aa] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#6d5232] transition hover:bg-[#f6efe4] dark:border-[#4d3925] dark:text-[#d9bb94] dark:hover:bg-[#33261b]"
+              >
+                <X size={12} aria-hidden />
+                Reset tanggal
+              </button>
+            </div>
+          ) : null}
 
           <div
             className="mb-3 flex flex-wrap gap-2"
