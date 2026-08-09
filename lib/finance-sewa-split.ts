@@ -50,3 +50,38 @@ export function splitNominalRupiahEqualParts(total: number, parts: number): numb
   const rem = t - base * p;
   return Array.from({ length: p }, (_, i) => base + (i === p - 1 ? rem : 0));
 }
+
+/**
+ * Alokasi sewa per bulan: booking fee hanya mengurangi kapasitas bulan pertama.
+ * Jika `paidTotal` diberi: isi kronologis (bulan 1 = min(harga−BF, sisa), lalu bulan berikutnya
+ * penuh harga) sampai total habis. Kelebihan di bulan terakhir.
+ */
+export function splitSewaNominalBookingFeeFirstMonth(args: {
+  hargaBulanan: number;
+  periodeBulan: number;
+  bookingFeeCredited: number;
+  /** Total nominal payment sewa yang dicatat (biasanya = sisa sewa; boleh lebih). */
+  paidTotal?: number;
+}): number[] {
+  const harga = Math.max(0, Math.round(Number(args.hargaBulanan) || 0));
+  const n = Math.max(0, Math.floor(Number(args.periodeBulan) || 0));
+  const credit = Math.max(0, Math.round(Number(args.bookingFeeCredited) || 0));
+  if (n <= 0) return [];
+
+  if (args.paidTotal == null) {
+    return Array.from({ length: n }, (_, i) => (i === 0 ? Math.max(0, harga - credit) : harga));
+  }
+
+  let rem = Math.max(0, Math.round(Number(args.paidTotal) || 0));
+  const parts: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const cap = i === 0 ? Math.max(0, harga - credit) : harga;
+    const take = Math.min(cap, rem);
+    parts.push(take);
+    rem -= take;
+  }
+  if (rem > 0 && parts.length > 0) {
+    parts[parts.length - 1] = (parts[parts.length - 1] ?? 0) + rem;
+  }
+  return parts;
+}

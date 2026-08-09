@@ -36,6 +36,7 @@ import type { PenghuniRow } from "@/components/penghuni-page-client";
 import type { KamarRow } from "@/components/kamar-page-client";
 import { buildDemoLokasiList, buildDemoUnitList } from "@/lib/demo-form-options";
 import { pelaporanBulanIsoFromDbRecord } from "@/lib/finance-pelaporan-bulan-from-db";
+import { planSewaSplitBookingFeeFirstMonthReallocation } from "@/lib/finance-sewa-split-reallocate";
 import {
   escapeIlikeExact,
   financeNotaTakenMessage,
@@ -1051,7 +1052,80 @@ export default function FinancePageClient({
     setIsLoading(true);
     if (localDemoMode) {
       const fin = readSandboxJson<FinanceRow[]>(SB_KEY.finance, initialFinanceData);
-      setFinanceData(fin);
+      const pen = readSandboxJson<PenghuniRow[]>(SB_KEY.penghuni, []);
+      const patches = planSewaSplitBookingFeeFirstMonthReallocation(
+        fin.map((r) => ({
+          id: r.id,
+          noNota: r.noNota,
+          pos: r.pos,
+          nominal: r.nominal,
+          pelaporanBulan: r.pelaporanBulan,
+          tanggal: r.tanggal,
+          paymentSplitGroupId: r.paymentSplitGroupId,
+          kategori: r.kategori,
+          namaPenghuni: r.namaPenghuni,
+          lokasiKos: r.lokasiKos,
+          unitBlok: r.unitBlok,
+          keterangan: r.keterangan,
+        })),
+        pen.map((p) => ({
+          hargaBulanan: parseRupiahToNumber(String(p.hargaBulanan ?? "")),
+          periodeBulan: Math.max(0, Math.floor(Number(p.periodeSewa) || 0)),
+          bookingFee: parseRupiahToNumber(String(p.bookingFee ?? "")),
+          bookingFeePaid: Boolean(p.bookingFeePaid),
+          sewaKamarNota: p.sewaKamarNota,
+          bookingFeeNota: p.bookingFeeNota,
+          cycleStartYmd: p.sewaCycleStart || p.tglCheckIn,
+        }))
+      );
+      if (
+        patches.bookingFeePosPatches.length > 0 ||
+        patches.patches.length > 0 ||
+        patches.deleteIds.length > 0 ||
+        patches.expandInserts.length > 0
+      ) {
+        const byIdPatch = new Map(patches.patches.map((p) => [p.id, p]));
+        const byIdBf = new Map(patches.bookingFeePosPatches.map((p) => [p.id, p]));
+        const deleteSet = new Set(patches.deleteIds);
+        const nextFin: FinanceRow[] = fin
+          .filter((r) => !deleteSet.has(r.id))
+          .map((r) => {
+            let next = r;
+            const bf = byIdBf.get(r.id);
+            if (bf) {
+              next = { ...next, pos: bf.pos, pelaporanBulan: bf.pelaporanBulan };
+            }
+            const pt = byIdPatch.get(r.id);
+            if (pt) {
+              next = {
+                ...next,
+                nominal: String(pt.nominal),
+                ...(pt.pelaporanBulan ? { pelaporanBulan: pt.pelaporanBulan } : {}),
+              };
+            }
+            return next;
+          });
+        for (const ins of patches.expandInserts) {
+          nextFin.unshift({
+            id: newSandboxId(),
+            noNota: ins.noNota,
+            kategori: ins.kategori === "Pengeluaran" ? "Pengeluaran" : "Pemasukan",
+            pos: ins.pos,
+            tanggal: ins.tanggal,
+            namaPenghuni: ins.namaPenghuni,
+            lokasiKos: ins.lokasiKos,
+            unitBlok: ins.unitBlok,
+            nominal: String(ins.nominal),
+            keterangan: ins.keterangan,
+            pelaporanBulan: ins.pelaporanBulan,
+            paymentSplitGroupId: ins.paymentSplitGroupId,
+          });
+        }
+        writeSandboxJson(SB_KEY.finance, nextFin);
+        setFinanceData(nextFin);
+      } else {
+        setFinanceData(fin);
+      }
       setErrorMessage("");
       setIsLoading(false);
       return true;
@@ -1122,26 +1196,147 @@ export default function FinancePageClient({
       );
     }
 
-    setErrorMessage("");
-    setFinanceData(
-      (financeRows ?? []).map((row) => {
+    const mappedFinance: FinanceRow[] = (financeRows ?? []).map((row) => {
+      const rec = row as Record<string, unknown>;
+      const kat: FinanceType = String(rec.kategori ?? "") === "Pengeluaran" ? "Pengeluaran" : "Pemasukan";
+      return {
+        id: String(rec.id ?? ""),
+        noNota: String(rec.no_nota ?? ""),
+        kategori: kat,
+        pos: String(rec.pos ?? ""),
+        pengeluaranScope:
+          kat === "Pengeluaran" ? normalizePengeluaranScope(rec.pengeluaran_scope) : null,
+        pemasukanScope:
+          kat === "Pemasukan"
+            ? (normalizePengeluaranScope(rec.pemasukan_scope) as PemasukanScope)
+            : null,
+        pemasukanKind:
+          kat === "Pemasukan"
+            ? (String(rec.pemasukan_kind ?? "").trim().toLowerCase() as PemasukanKind)
+            : null,
+        tanggal: String(rec.tanggal ?? ""),
+        namaPenghuni: String(rec.nama_penghuni ?? ""),
+        lokasiKos: String(rec.lokasi_kos ?? ""),
+        unitBlok: String(rec.unit_blok ?? ""),
+        nominal: String(rec.nominal ?? ""),
+        keterangan: String(rec.keterangan ?? ""),
+        pelaporanBulan: pelaporanBulanIsoFromDbRecord(rec),
+        paymentSplitGroupId: rec.payment_split_group_id
+          ? String(rec.payment_split_group_id)
+          : undefined,
+        updatedAt: rec.updated_at
+          ? String(rec.updated_at)
+          : rec.created_at
+            ? String(rec.created_at)
+            : undefined,
+      };
+    });
+
+    const { data: penghuniPayRows } = await supabase
+      .from("penghuni")
+      .select(
+        "harga_bulanan, periode_sewa_bulan, booking_fee, booking_fee_paid, booking_fee_nota, sewa_kamar_nota, sewa_cycle_start, tgl_check_in"
+      );
+
+    const patches = planSewaSplitBookingFeeFirstMonthReallocation(
+      mappedFinance.map((r) => ({
+        id: r.id,
+        noNota: r.noNota,
+        pos: r.pos,
+        nominal: r.nominal,
+        pelaporanBulan: r.pelaporanBulan,
+        tanggal: r.tanggal,
+        paymentSplitGroupId: r.paymentSplitGroupId,
+        kategori: r.kategori,
+        namaPenghuni: r.namaPenghuni,
+        lokasiKos: r.lokasiKos,
+        unitBlok: r.unitBlok,
+        keterangan: r.keterangan,
+      })),
+      (penghuniPayRows ?? []).map((row) => {
         const rec = row as Record<string, unknown>;
-        const kat = String(rec.kategori ?? "") === "Pengeluaran" ? "Pengeluaran" : ("Pemasukan" as const);
+        const hargaRaw = rec.harga_bulanan;
+        const bfRaw = rec.booking_fee;
+        return {
+          hargaBulanan:
+            typeof hargaRaw === "number"
+              ? Math.max(0, Math.round(hargaRaw))
+              : parseRupiahToNumber(String(hargaRaw ?? "")),
+          periodeBulan: Math.max(0, Math.floor(Number(rec.periode_sewa_bulan) || 0)),
+          bookingFee:
+            typeof bfRaw === "number"
+              ? Math.max(0, Math.round(bfRaw))
+              : parseRupiahToNumber(String(bfRaw ?? "")),
+          bookingFeePaid: Boolean(rec.booking_fee_paid),
+          sewaKamarNota: String(rec.sewa_kamar_nota ?? ""),
+          bookingFeeNota: String(rec.booking_fee_nota ?? ""),
+          cycleStartYmd: String(rec.sewa_cycle_start ?? rec.tgl_check_in ?? ""),
+        };
+      })
+    );
+
+    let finalFinance = mappedFinance;
+    if (
+      patches.bookingFeePosPatches.length > 0 ||
+      patches.patches.length > 0 ||
+      patches.deleteIds.length > 0 ||
+      patches.expandInserts.length > 0
+    ) {
+      const insertPayloads = patches.expandInserts.map((ins) => ({
+        no_nota: ins.noNota,
+        kategori: ins.kategori === "Pengeluaran" ? "Pengeluaran" : "Pemasukan",
+        pos: ins.pos,
+        tanggal: ins.tanggal,
+        nama_penghuni: ins.namaPenghuni,
+        nominal: ins.nominal,
+        keterangan: ins.keterangan,
+        lokasi_kos: ins.lokasiKos,
+        unit_blok: ins.unitBlok,
+        pelaporan_bulan: ins.pelaporanBulan,
+      }));
+
+      const results = await Promise.all([
+        ...patches.bookingFeePosPatches.map((p) =>
+          supabase
+            .from("finance")
+            .update({ pos: p.pos, pelaporan_bulan: p.pelaporanBulan })
+            .eq("id", p.id)
+        ),
+        ...patches.patches.map((p) =>
+          supabase
+            .from("finance")
+            .update({
+              nominal: p.nominal,
+              ...(p.pelaporanBulan ? { pelaporan_bulan: p.pelaporanBulan } : {}),
+            })
+            .eq("id", p.id)
+        ),
+        ...patches.deleteIds.map((id) => supabase.from("finance").delete().eq("id", id)),
+        ...(insertPayloads.length
+          ? [supabase.from("finance").insert(insertPayloads).select("*")]
+          : []),
+      ]);
+      const firstErr = results.find((r) => r.error)?.error;
+      if (firstErr) {
+        setErrorMessage(firstErr.message);
+        setIsLoading(false);
+        return false;
+      }
+
+      const insertedRaw = insertPayloads.length
+        ? ((results[results.length - 1] as { data?: unknown[] | null }).data ?? [])
+        : [];
+      const insertedMapped: FinanceRow[] = insertedRaw.map((row) => {
+        const rec = row as Record<string, unknown>;
+        const kat: FinanceType = String(rec.kategori ?? "") === "Pengeluaran" ? "Pengeluaran" : "Pemasukan";
         return {
           id: String(rec.id ?? ""),
           noNota: String(rec.no_nota ?? ""),
           kategori: kat,
           pos: String(rec.pos ?? ""),
-          pengeluaranScope:
-            kat === "Pengeluaran" ? normalizePengeluaranScope(rec.pengeluaran_scope) : null,
-          pemasukanScope:
-            kat === "Pemasukan"
-              ? (normalizePengeluaranScope(rec.pemasukan_scope) as PemasukanScope)
-              : null,
-          pemasukanKind:
-            kat === "Pemasukan"
-              ? (String(rec.pemasukan_kind ?? "").trim().toLowerCase() as PemasukanKind)
-              : null,
+          pengeluaranScope: null,
+          pemasukanScope: null,
+          pemasukanKind: null,
           tanggal: String(rec.tanggal ?? ""),
           namaPenghuni: String(rec.nama_penghuni ?? ""),
           lokasiKos: String(rec.lokasi_kos ?? ""),
@@ -1158,8 +1353,36 @@ export default function FinancePageClient({
               ? String(rec.created_at)
               : undefined,
         };
-      })
-    );
+      });
+
+      const byIdPatch = new Map(patches.patches.map((p) => [p.id, p]));
+      const byIdBf = new Map(patches.bookingFeePosPatches.map((p) => [p.id, p]));
+      const deleteSet = new Set(patches.deleteIds);
+      finalFinance = [
+        ...insertedMapped,
+        ...mappedFinance
+          .filter((r) => !deleteSet.has(r.id))
+          .map((r) => {
+            let next = r;
+            const bf = byIdBf.get(r.id);
+            if (bf) {
+              next = { ...next, pos: bf.pos, pelaporanBulan: bf.pelaporanBulan };
+            }
+            const pt = byIdPatch.get(r.id);
+            if (pt) {
+              next = {
+                ...next,
+                nominal: String(pt.nominal),
+                ...(pt.pelaporanBulan ? { pelaporanBulan: pt.pelaporanBulan } : {}),
+              };
+            }
+            return next;
+          }),
+      ];
+    }
+
+    setErrorMessage("");
+    setFinanceData(finalFinance);
     setIsLoading(false);
     return true;
   }, [localDemoMode, initialFinanceData]);

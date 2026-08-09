@@ -85,28 +85,37 @@ export function clearPenghuniPaymentLinkedToFinanceRow<T extends PenghuniPayment
     return rows;
   }
   return rows.map((p) => {
-    if (isSewaKamarFinancePos(deleted.pos) && (p.sewaKamarNota ?? "").trim() === nota) {
-      return { ...p, sewaKamarPaid: false, sewaKamarNota: "" };
+    let next = p;
+    // Booking fee kini dicatat sebagai POS Sewa kamar — cocokkan lewat nota BF, bukan hanya label POS.
+    if ((next.bookingFeeNota ?? "").trim() === nota) {
+      next = { ...next, bookingFeePaid: false, bookingFeeNota: "" };
     }
-    if (isDepositFinancePos(deleted.pos) && (p.depositKamarNota ?? "").trim() === nota) {
-      return { ...p, depositKamarPaid: false, depositKamarNota: "" };
+    if (isSewaKamarFinancePos(deleted.pos) && (next.sewaKamarNota ?? "").trim() === nota) {
+      next = { ...next, sewaKamarPaid: false, sewaKamarNota: "" };
     }
-    if (isBookingFeeFinancePos(deleted.pos) && (p.bookingFeeNota ?? "").trim() === nota) {
-      return { ...p, bookingFeePaid: false, bookingFeeNota: "" };
+    if (isDepositFinancePos(deleted.pos) && (next.depositKamarNota ?? "").trim() === nota) {
+      next = { ...next, depositKamarPaid: false, depositKamarNota: "" };
     }
-    return p;
+    if (isBookingFeeFinancePos(deleted.pos) && (next.bookingFeeNota ?? "").trim() === nota) {
+      next = { ...next, bookingFeePaid: false, bookingFeeNota: "" };
+    }
+    return next;
   });
 }
 
-/** Sisa sewa setelah DP booking fee (jika sudah lunas). */
+/**
+ * Sisa sewa setelah DP booking fee (jika sudah lunas).
+ * BF hanya dikreditkan maksimal sebesar 1× harga bulanan (potong bulan pertama saja).
+ */
 export function remainingSewaAfterBookingFee(args: {
   hargaBulanan: number;
   periodeBulan: number;
   bookingFee: number;
   bookingFeePaid?: boolean;
 }): number {
-  const total = Math.max(0, args.hargaBulanan) * Math.max(0, args.periodeBulan);
-  const credited = args.bookingFeePaid ? Math.max(0, args.bookingFee) : 0;
+  const harga = Math.max(0, args.hargaBulanan);
+  const total = harga * Math.max(0, args.periodeBulan);
+  const credited = args.bookingFeePaid ? Math.min(Math.max(0, args.bookingFee), harga) : 0;
   return Math.max(0, total - credited);
 }
 

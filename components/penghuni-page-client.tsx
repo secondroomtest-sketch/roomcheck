@@ -28,6 +28,7 @@ import {
   Search,
   Ticket,
   Trash2,
+  Undo2,
   UserPlus,
   Users,
   X,
@@ -44,7 +45,6 @@ import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY, newSandboxId } from "@/lib/sandbox-storage";
 import {
-  FINANCE_POS_BOOKING_FEE,
   FINANCE_POS_DEPOSIT_KAMAR,
   FINANCE_POS_SEWA_KAMAR,
   canPromoteBookingToStay,
@@ -75,7 +75,7 @@ import {
   suggestNextSrNotaDigitsFromLast,
   SR_NOTA_MAX_DIGITS,
 } from "@/lib/finance-nota-validation";
-import { buildSewaSplitCalendarMonthStarts, splitNominalRupiahEqualParts } from "@/lib/finance-sewa-split";
+import { buildSewaSplitCalendarMonthStarts, splitSewaNominalBookingFeeFirstMonth, startOfCalendarMonthYmd } from "@/lib/finance-sewa-split";
 import type { KamarRow } from "@/components/kamar-page-client";
 import type { FinanceRow } from "@/components/finance-page-client";
 
@@ -426,6 +426,7 @@ export default function PenghuniPageClient({
   const canManageSurvey = viewerRole === "super_admin" || viewerRole === "manager";
   const canEditPenghuni = viewerRole === "super_admin" || viewerRole === "supervisor";
   const canDeletePenghuni = viewerRole === "super_admin";
+  const canCancelCheckout = viewerRole === "super_admin";
 
   const kamarSandboxRows = useMemo(() => {
     if (!localDemoMode || !sandboxReady) return [] as KamarRow[];
@@ -531,7 +532,7 @@ export default function PenghuniPageClient({
       Boolean(form.bookingFee.replace(/\D/g, "")) ||
       Boolean(form.depositKamar.replace(/\D/g, ""));
     if (!hasAny && bulan === 0) return "—";
-    const sisaSewa = Math.max(0, h * bulan - bookingFee);
+    const sisaSewa = Math.max(0, h * bulan - Math.min(bookingFee, h));
     const total = sisaSewa + deposit;
     const formatted = Math.abs(total).toLocaleString("id-ID");
     return total < 0 ? `Rp -${formatted}` : `Rp ${formatted}`;
@@ -545,7 +546,7 @@ export default function PenghuniPageClient({
     const sewaTotal = h * bulan;
     const bookingFeeNum = parseRupiahToNumber(r.bookingFee);
     const depositNum = parseRupiahToNumber(r.depositKamar);
-    const sisaSewaTarget = Math.max(0, sewaTotal - bookingFeeNum);
+    const sisaSewaTarget = Math.max(0, sewaTotal - Math.min(bookingFeeNum, h));
     const sisaSewaUnpaid = r.sewaKamarPaid ? 0 : sisaSewaTarget;
     const sisaKeStay = sisaSewaUnpaid + (r.depositKamarPaid ? 0 : depositNum);
     const sisaFormatted =
@@ -1949,6 +1950,94 @@ export default function PenghuniPageClient({
     toast(`${row.namaLengkap} berhasil check out. Kamar tersedia kembali.`, "success");
   };
 
+  const handleCancelCheckoutPenghuni = async () => {
+    const row = penghuniProfileRow;
+    if (!row || row.status !== "History") return;
+    if (!canCancelCheckout) {
+      toast("Hanya super admin yang dapat membatalkan check out.", "error");
+      return;
+    }
+
+    const cycleStart = getActiveSewaCycleStart(row) || String(row.tglCheckIn ?? "").trim().slice(0, 10);
+    const bulan = Math.max(0, Math.floor(Number(row.periodeSewa) || 0));
+    let restoredCheckOut = "";
+    if (cycleStart && bulan > 0) {
+      restoredCheckOut = addCalendarMonthsToIsoDate(cycleStart, bulan);
+    }
+    if (!restoredCheckOut) {
+      toast("Tidak bisa menghitung ulang tanggal check-out. Periksa tanggal check-in dan periode sewa.", "error");
+      return;
+    }
+
+    const roomTaken = [...data, ...historyData].some(
+      (p) =>
+        p.id !== row.id &&
+        penghuniCountsAsOccupyingKamar(p) &&
+        (p.lokasiKos ?? "").trim() === (row.lokasiKos ?? "").trim() &&
+        (p.unitBlok ?? "").trim() === (row.unitBlok ?? "").trim() &&
+        (p.noKamar ?? "").trim().toLowerCase() === (row.noKamar ?? "").trim().toLowerCase()
+    );
+    if (roomTaken) {
+      toast(
+        `Kamar ${row.unitBlok} / ${row.noKamar} sudah ditempati penghuni lain. Batalkan check out tidak bisa dilanjutkan.`,
+        "error"
+      );
+      return;
+    }
+
+    const ok = await confirm({
+      title: "Batalkan check out?",
+      message: `${row.namaLengkap} akan dikembalikan ke status Stay. Tanggal check-out dihitung ulang menjadi ${restoredCheckOut} (check-in/siklus + ${bulan} bulan). Kamar kembali Occupied.`,
+      confirmLabel: "Ya, batalkan check out",
+      cancelLabel: "Batal",
+    });
+    if (!ok) {
+      toast("Dibatalkan.", "info");
+      return;
+    }
+
+    const restored: PenghuniRow = {
+      ...row,
+      status: "Stay",
+      tglCheckOut: restoredCheckOut,
+      sewaCycleStart: cycleStart,
+      sewaCycleEnd: restoredCheckOut,
+    };
+
+    if (localDemoMode) {
+      const nextHistory = historyData.filter((h) => h.id !== row.id);
+      const nextActive = [restored, ...data.filter((p) => p.id !== row.id)];
+      setHistoryData(nextHistory);
+      setData(nextActive);
+      persistPenghuniSandbox(nextActive, nextHistory);
+      const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
+      writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, nextActive));
+      setPenghuniProfileRow(restored);
+      toast(`${row.namaLengkap} berhasil dikembalikan ke Stay.`, "success");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("penghuni")
+      .update({
+        status: "Stay",
+        tgl_check_out: restoredCheckOut,
+        sewa_cycle_start: cycleStart,
+        sewa_cycle_end: restoredCheckOut,
+      })
+      .eq("id", row.id);
+    if (!isMountedRef.current) return;
+    if (error) {
+      toast(error.message, "error");
+      return;
+    }
+    await loadPenghuni();
+    await reconcileCloudKamarWithPenghuni();
+    if (!isMountedRef.current) return;
+    setPenghuniProfileRow(restored);
+    toast(`${row.namaLengkap} berhasil dikembalikan ke Stay.`, "success");
+  };
+
   const handleSendSurveyWa = (row: SurveyCalonRow) => {
     const msg = `Halo ${row.namaLengkap}, kami dari Second Room ingin menindaklanjuti jadwal survey Anda (${row.rencanaCheckIn || "-"}) untuk unit ${row.unitBlok || "-"}.`;
     const url = toWhatsAppDeepLink(row.noWa, msg);
@@ -2134,7 +2223,19 @@ export default function PenghuniPageClient({
       toast("Tidak dapat membuat alokasi bulan P&L. Periksa tanggal check-in penghuni.", "error");
       return;
     }
-    const nominalParts = splitNominalRupiahEqualParts(nominalNum, bulan);
+    const hargaBulanan = parseRupiahToNumber(row.hargaBulanan);
+    const bookingFeeCredited = row.bookingFeePaid ? bookingFeeNum : 0;
+    const nominalParts = splitSewaNominalBookingFeeFirstMonth({
+      hargaBulanan,
+      periodeBulan: bulan,
+      bookingFeeCredited,
+      paidTotal: nominalNum,
+    });
+    const financeMonthCount = nominalParts.filter((n) => n > 0).length;
+    if (financeMonthCount <= 0) {
+      toast("Nominal sewa setelah alokasi booking fee tidak menghasilkan transaksi Finance.", "error");
+      return;
+    }
 
     const hitungText = `Perhitungan: ${formatRpNumber(nominalNum)} − ${formatRpNumber(referensiProfil)} = ${formatRpNumber(selisih)}.`;
     const statusNote =
@@ -2145,7 +2246,7 @@ export default function PenghuniPageClient({
           : " Status sewa kamar ditandai lunas.";
     const ok = await confirm({
       title: "Konfirmasi payment sewa kamar?",
-      message: `${hitungText} Catat pembayaran (nota ${noNota}) untuk ${row.namaLengkap}? Di Finance akan dibuat ${bulan} transaksi pemasukan (nota sama), nominal per bulan mengikuti pembagian rata, bulan laporan mengikuti kalender mulai bulan check-in.${statusNote}`,
+      message: `${hitungText} Catat pembayaran (nota ${noNota}) untuk ${row.namaLengkap}? Di Finance akan dibuat ${financeMonthCount} transaksi pemasukan Sewa kamar (nota sama): sisa bulan pertama = harga − booking fee, bulan berikutnya harga penuh (baris nominal 0 tidak dicatat). Booking fee sendiri sudah/akan masuk sebagai Sewa kamar bulan pertama. Bulan laporan dari kalender check-in.${statusNote}`,
       confirmLabel: "Ya, konfirmasi",
       cancelLabel: "Batal",
     });
@@ -2186,45 +2287,59 @@ export default function PenghuniPageClient({
         ...stayPatch,
       });
       const fin = readSandboxJson<FinanceRow[]>(SB_KEY.finance, []);
-      const newFinRows: FinanceRow[] = monthStarts.map((pel, idx) => {
-        const niceMonth = new Date(`${pel}T12:00:00`).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+      const newFinRows: FinanceRow[] = monthStarts.flatMap((pel, idx) => {
+        const partNominal = nominalParts[idx] ?? 0;
+        if (partNominal <= 0) return [];
+        const niceMonth = new Date(`${pel}T12:00:00`).toLocaleDateString("id-ID", {
+          month: "long",
+          year: "numeric",
+        });
         const partLabel = `${idx + 1}/${bulan}`;
         const keteranganFin = `Payment sewa kamar · ${row.unitBlok} / ${row.noKamar} · ${hitungText} · Bulan laporan: ${niceMonth} (${partLabel}) · Dibayar: ${paymentDate}`;
-        return {
-          id: newSandboxId(),
-          noNota,
-          kategori: "Pemasukan" as const,
-          pos: FINANCE_POS_SEWA_KAMAR,
-          tanggal: paymentDate,
-          namaPenghuni: row.namaLengkap,
-          lokasiKos: row.lokasiKos,
-          unitBlok: row.unitBlok,
-          nominal: String(nominalParts[idx] ?? 0),
-          keterangan: keteranganFin,
-          pelaporanBulan: pel,
-          paymentSplitGroupId: paymentSplitGroupId,
-        };
+        return [
+          {
+            id: newSandboxId(),
+            noNota,
+            kategori: "Pemasukan" as const,
+            pos: FINANCE_POS_SEWA_KAMAR,
+            tanggal: paymentDate,
+            namaPenghuni: row.namaLengkap,
+            lokasiKos: row.lokasiKos,
+            unitBlok: row.unitBlok,
+            nominal: String(partNominal),
+            keterangan: keteranganFin,
+            pelaporanBulan: pel,
+            paymentSplitGroupId: paymentSplitGroupId,
+          },
+        ];
       });
       writeSandboxJson(SB_KEY.finance, [...newFinRows, ...fin]);
       const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
       writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, updatedPen));
     } else {
-      const inserts = monthStarts.map((pel, idx) => {
-        const niceMonth = new Date(`${pel}T12:00:00`).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+      const inserts = monthStarts.flatMap((pel, idx) => {
+        const partNominal = nominalParts[idx] ?? 0;
+        if (partNominal <= 0) return [];
+        const niceMonth = new Date(`${pel}T12:00:00`).toLocaleDateString("id-ID", {
+          month: "long",
+          year: "numeric",
+        });
         const partLabel = `${idx + 1}/${bulan}`;
         const keteranganFin = `Payment sewa kamar · ${row.unitBlok} / ${row.noKamar} · ${hitungText} · Bulan laporan: ${niceMonth} (${partLabel}) · Dibayar: ${paymentDate}`;
-        return {
-          no_nota: noNota,
-          kategori: "Pemasukan" as const,
-          pos: FINANCE_POS_SEWA_KAMAR,
-          tanggal: paymentDate,
-          nama_penghuni: row.namaLengkap,
-          nominal: nominalParts[idx] ?? 0,
-          keterangan: keteranganFin,
-          lokasi_kos: row.lokasiKos,
-          unit_blok: row.unitBlok,
-          pelaporan_bulan: pel,
-        };
+        return [
+          {
+            no_nota: noNota,
+            kategori: "Pemasukan" as const,
+            pos: FINANCE_POS_SEWA_KAMAR,
+            tanggal: paymentDate,
+            nama_penghuni: row.namaLengkap,
+            nominal: partNominal,
+            keterangan: keteranganFin,
+            lokasi_kos: row.lokasiKos,
+            unit_blok: row.unitBlok,
+            pelaporan_bulan: pel,
+          },
+        ];
       });
       const { error: finErr } = await supabase.from("finance").insert(inserts);
       if (finErr) {
@@ -2335,9 +2450,17 @@ export default function PenghuniPageClient({
       : isBookingFee
         ? " Status penghuni tetap Booking."
         : "";
+    const bfCycleStart = isBookingFee ? getActiveSewaCycleStart(row) || paymentDate : "";
+    const bfPelaporanBulan = isBookingFee ? startOfCalendarMonthYmd(bfCycleStart) || startOfCalendarMonthYmd(paymentDate) : "";
+    if (isBookingFee && !bfPelaporanBulan) {
+      toast("Isi rencana check-in terlebih dahulu agar booking fee masuk P&L bulan yang benar.", "error");
+      return;
+    }
     const ok = await confirm({
       title: isBookingFee ? "Konfirmasi payment booking fee?" : "Konfirmasi payment deposit kamar?",
-      message: `${hitungText} Catat pembayaran ${isBookingFee ? "booking fee" : "deposit"} (nota ${noNota}) untuk ${row.namaLengkap}? Tanggal payment: ${paymentDate}. Nominal di Finance mengikuti nilai input panel (${formatRpNumber(nominalNum)}). Status ${isBookingFee ? "booking fee" : "deposit"} ditandai lunas.${stayNote}`,
+      message: isBookingFee
+        ? `${hitungText} Catat booking fee (nota ${noNota}) untuk ${row.namaLengkap}? Akan masuk Finance sebagai pemasukan Sewa kamar untuk bulan pertama P&L (${bfPelaporanBulan}). Tanggal payment: ${paymentDate}. Status booking fee ditandai lunas.${stayNote}`
+        : `${hitungText} Catat pembayaran deposit (nota ${noNota}) untuk ${row.namaLengkap}? Tanggal payment: ${paymentDate}. Nominal di Finance mengikuti nilai input panel (${formatRpNumber(nominalNum)}). Status deposit ditandai lunas.${stayNote}`,
       confirmLabel: "Ya, konfirmasi",
       cancelLabel: "Batal",
     });
@@ -2347,8 +2470,10 @@ export default function PenghuniPageClient({
     }
 
     const tanggal = paymentDate;
-    const keteranganFin = `Payment ${isBookingFee ? "booking fee" : "deposit kamar"} · ${row.unitBlok} / ${row.noKamar} · ${hitungText} · Dibayar: ${paymentDate}`;
-    const financePos = isBookingFee ? FINANCE_POS_BOOKING_FEE : FINANCE_POS_DEPOSIT_KAMAR;
+    const keteranganFin = isBookingFee
+      ? `Payment booking fee (DP sewa bulan pertama) · ${row.unitBlok} / ${row.noKamar} · ${hitungText} · Bulan laporan: ${bfPelaporanBulan} · Dibayar: ${paymentDate}`
+      : `Payment deposit kamar · ${row.unitBlok} / ${row.noKamar} · ${hitungText} · Dibayar: ${paymentDate}`;
+    const financePos = isBookingFee ? FINANCE_POS_SEWA_KAMAR : FINANCE_POS_DEPOSIT_KAMAR;
     const stayPatch = willPromote
       ? {
           status: "Stay" as PenghuniStatus,
@@ -2391,6 +2516,7 @@ export default function PenghuniPageClient({
         unitBlok: row.unitBlok,
         nominal: String(nominalNum),
         keterangan: keteranganFin,
+        ...(isBookingFee ? { pelaporanBulan: bfPelaporanBulan } : {}),
       };
       writeSandboxJson(SB_KEY.finance, [finRow, ...fin]);
       const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
@@ -2406,6 +2532,7 @@ export default function PenghuniPageClient({
         keterangan: keteranganFin,
         lokasi_kos: row.lokasiKos,
         unit_blok: row.unitBlok,
+        ...(isBookingFee ? { pelaporan_bulan: bfPelaporanBulan } : {}),
       });
       if (finErr) {
         toast(finErr.message, "error");
@@ -3228,6 +3355,18 @@ export default function PenghuniPageClient({
                     </button>
                   </div>
                 ) : null}
+                {penghuniProfileRow.status === "History" && canCancelCheckout ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelCheckoutPenghuni()}
+                      className="btn-tactile inline-flex items-center gap-2 rounded-lg border border-sky-300 bg-sky-100 px-2.5 py-1.5 text-[11px] font-semibold text-sky-900 transition hover:bg-sky-200 dark:border-sky-700 dark:bg-sky-900/40 dark:text-sky-100 dark:hover:bg-sky-900/60"
+                    >
+                      <Undo2 size={13} aria-hidden />
+                      Batalkan check out
+                    </button>
+                  </div>
+                ) : null}
               </div>
               <div className="pt-1">
                 <button
@@ -3359,7 +3498,7 @@ export default function PenghuniPageClient({
                     </p>
                     <p className="mt-1 text-xs text-[#6e5336] dark:text-[#bfa27f]">
                       {profilePanelDerived.hargaBulanFormatted} × {profilePanelDerived.periodeBulan} bulan
-                      {penghuniProfileRow.status === "Booking" ? " − booking fee" : ""}
+                      {penghuniProfileRow.status === "Booking" ? " − booking fee (bulan pertama)" : ""}
                     </p>
                     {penghuniProfileRow.sewaKamarPaid ? (
                       <span
@@ -3387,9 +3526,21 @@ export default function PenghuniPageClient({
                 </p>
               ) : null}
               {penghuniProfileRow.status === "History" ? (
-                <p className="rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-200">
-                  Penghuni ini sudah check out dan hanya tampil di daftar Penghuni Check Out.
-                </p>
+                <div className="space-y-2">
+                  <p className="rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-200">
+                    Penghuni ini sudah check out dan hanya tampil di daftar Penghuni Check Out.
+                  </p>
+                  {canCancelCheckout ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelCheckoutPenghuni()}
+                      className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100 dark:hover:bg-sky-900/50"
+                    >
+                      <Undo2 size={18} aria-hidden />
+                      Batalkan check out
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               {penghuniProfileRow.status === "Booking" ? (
                 <>
@@ -3796,7 +3947,7 @@ export default function PenghuniPageClient({
               <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#8b6d48] dark:text-[#b79a78]">POS</span>
               <input
                 readOnly
-                value={depositPaymentKind === "booking_fee" ? FINANCE_POS_BOOKING_FEE : FINANCE_POS_DEPOSIT_KAMAR}
+                value={depositPaymentKind === "booking_fee" ? FINANCE_POS_SEWA_KAMAR : FINANCE_POS_DEPOSIT_KAMAR}
                 className="mt-1 w-full rounded-xl border border-[#d5be9e] bg-[#f3ebe0] px-3 py-2.5 text-[#2c2218] dark:border-[#4f3b2a] dark:bg-[#2a2018] dark:text-[#f5e8d4]"
               />
             </label>
@@ -4135,7 +4286,7 @@ export default function PenghuniPageClient({
                 <p className="mt-1 text-[10px] text-[#8b6d48] dark:text-[#b79a78]">
                   {form.status === "Stay"
                     ? "Dihitung: (Harga Bulanan × Periode Sewa) + Deposit Kamar"
-                    : "Dihitung: (Harga Bulanan × Periode Sewa − Booking Fee) + Deposit Kamar"}
+                    : "Dihitung: (Harga Bulanan × Periode Sewa − Booking Fee maks. 1 bulan) + Deposit Kamar"}
                 </p>
               </div>
               <div className="md:col-span-2">
