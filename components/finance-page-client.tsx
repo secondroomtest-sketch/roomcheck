@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useCallback,
+  useRef,
   useState,
 } from "react";
 import { supabase } from "@/libsupabaseClient";
@@ -241,18 +242,30 @@ function pengeluaranFormSkipsLocationUnit(scopeFilter: PengeluaranScope): boolea
 
 const PLACEHOLDER_LOKASI_FORM = "(Belum ada data lokasi)";
 const PLACEHOLDER_UNIT_FORM = "(Belum ada unit untuk lokasi ini)";
+const PLACEHOLDER_LOKASI_PICK = "";
+const LOKASI_PICK_LABEL = "Pilih lokasi kos";
+const UNIT_PICK_LABEL = "Pilih blok/unit";
+const UNIT_NEED_LOKASI_LABEL = "Pilih lokasi terlebih dahulu";
 
 function isValidRealLokasiForPengeluaranKos(value: string): boolean {
   const v = String(value ?? "").trim();
   if (!v) return false;
-  if (v === PLACEHOLDER_LOKASI_FORM) return false;
+  if (v === PLACEHOLDER_LOKASI_FORM || v === LOKASI_PICK_LABEL) return false;
+  if (v.startsWith("(Belum ada lokasi")) return false;
   return true;
 }
 
 function isValidRealUnitForPengeluaranKos(value: string): boolean {
   const v = String(value ?? "").trim();
   if (!v) return false;
-  if (v === PLACEHOLDER_UNIT_FORM) return false;
+  if (
+    v === PLACEHOLDER_UNIT_FORM ||
+    v === UNIT_PICK_LABEL ||
+    v === UNIT_NEED_LOKASI_LABEL
+  ) {
+    return false;
+  }
+  if (v.startsWith("(Belum ada unit")) return false;
   return true;
 }
 
@@ -640,6 +653,16 @@ export default function FinancePageClient({
     pelaporanBulan: "",
     paymentSplitGroupId: "",
   });
+  /** Opsi form payment dari Master + Kamar (mode cloud). */
+  const [cloudMasterLokasi, setCloudMasterLokasi] = useState<Array<{ id: string; namaLokasi: string }>>(
+    []
+  );
+  const [cloudMasterBlok, setCloudMasterBlok] = useState<Array<{ lokasiId: string; namaBlok: string }>>(
+    []
+  );
+  const [cloudKamarLocUnit, setCloudKamarLocUnit] = useState<
+    Array<{ lokasiKos: string; unitBlok: string }>
+  >([]);
   /** Hanya untuk kategori Pengeluaran — memilih subset POS kos vs manajemen. */
   const [pengeluaranScopeFilter, setPengeluaranScopeFilter] = useState<PengeluaranScope>("kos");
   const [financeData, setFinanceData] = useState<FinanceRow[]>(initialFinanceData);
@@ -648,6 +671,7 @@ export default function FinancePageClient({
   const [financeRiwayatPos, setFinanceRiwayatPos] = useState<string>("Semua");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const financeSubmitLockRef = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -1014,23 +1038,63 @@ export default function FinancePageClient({
     if (localDemoMode) {
       return buildDemoLokasiList(sandboxReady, kamarSandboxRows, rowsForLocationMerge);
     }
-    return lokasiFilterOptions.length ? lokasiFilterOptions : [PLACEHOLDER_LOKASI_FORM];
-  }, [localDemoMode, sandboxReady, kamarSandboxRows, rowsForLocationMerge, lokasiFilterOptions]);
-
-  const formUnitOptions = useMemo(() => {
-    if (localDemoMode) {
-      return buildDemoUnitList(sandboxReady, form.lokasiKos, kamarSandboxRows, rowsForLocationMerge);
-    }
-    const allRows = rowsForLocationMerge.filter((r) => !form.lokasiKos || r.lokasiKos === form.lokasiKos);
-    const arr = Array.from(new Set(allRows.map((r) => r.unitBlok).filter(Boolean))).sort((a, b) =>
+    const fromMaster = cloudMasterLokasi.map((l) => l.namaLokasi).filter(Boolean);
+    const fromKamar = cloudKamarLocUnit.map((r) => r.lokasiKos).filter(Boolean);
+    const fromFinance = lokasiFilterOptions;
+    const merged = Array.from(new Set([...fromMaster, ...fromKamar, ...fromFinance])).sort((a, b) =>
       a.localeCompare(b, "id")
     );
-    return arr.length ? arr : [PLACEHOLDER_UNIT_FORM];
-  }, [localDemoMode, sandboxReady, form.lokasiKos, kamarSandboxRows, rowsForLocationMerge]);
+    return merged.length ? merged : [PLACEHOLDER_LOKASI_FORM];
+  }, [
+    localDemoMode,
+    sandboxReady,
+    kamarSandboxRows,
+    rowsForLocationMerge,
+    cloudMasterLokasi,
+    cloudKamarLocUnit,
+    lokasiFilterOptions,
+  ]);
+
+  const formUnitOptions = useMemo(() => {
+    if (!isValidRealLokasiForPengeluaranKos(form.lokasiKos)) return [] as string[];
+    let units: string[];
+    if (localDemoMode) {
+      units = buildDemoUnitList(sandboxReady, form.lokasiKos, kamarSandboxRows, rowsForLocationMerge);
+    } else {
+      const lok = cloudMasterLokasi.find((l) => l.namaLokasi === form.lokasiKos);
+      const fromBlok = lok
+        ? cloudMasterBlok
+            .filter((b) => b.lokasiId === lok.id)
+            .map((b) => b.namaBlok)
+            .filter(Boolean)
+        : [];
+      const fromKamar = cloudKamarLocUnit
+        .filter((r) => r.lokasiKos === form.lokasiKos)
+        .map((r) => r.unitBlok)
+        .filter(Boolean);
+      const fromFinance = rowsForLocationMerge
+        .filter((r) => r.lokasiKos === form.lokasiKos)
+        .map((r) => r.unitBlok)
+        .filter(Boolean);
+      units = Array.from(new Set([...fromBlok, ...fromKamar, ...fromFinance])).sort((a, b) =>
+        a.localeCompare(b, "id")
+      );
+    }
+    return units.filter(isValidRealUnitForPengeluaranKos);
+  }, [
+    localDemoMode,
+    sandboxReady,
+    form.lokasiKos,
+    kamarSandboxRows,
+    rowsForLocationMerge,
+    cloudMasterLokasi,
+    cloudMasterBlok,
+    cloudKamarLocUnit,
+  ]);
 
   const lokasiOptionsForSelect = useMemo(() => {
-    const base = [...formLokasiOptions];
-    if (form.lokasiKos && !base.includes(form.lokasiKos)) {
+    const base = formLokasiOptions.filter(isValidRealLokasiForPengeluaranKos);
+    if (isValidRealLokasiForPengeluaranKos(form.lokasiKos) && !base.includes(form.lokasiKos)) {
       return [form.lokasiKos, ...base];
     }
     return base;
@@ -1038,7 +1102,11 @@ export default function FinancePageClient({
 
   const unitOptionsForSelect = useMemo(() => {
     const base = [...formUnitOptions];
-    if (form.unitBlok && !base.includes(form.unitBlok)) {
+    if (
+      form.unitBlok &&
+      isValidRealUnitForPengeluaranKos(form.unitBlok) &&
+      !base.includes(form.unitBlok)
+    ) {
       return [form.unitBlok, ...base];
     }
     return base;
@@ -1046,13 +1114,6 @@ export default function FinancePageClient({
 
   const lokasiUnitNotApplicable =
     form.kategori === "Pengeluaran" && pengeluaranFormSkipsLocationUnit(pengeluaranScopeFilter);
-
-  useEffect(() => {
-    if (lokasiUnitNotApplicable) return;
-    const first = formLokasiOptions[0];
-    if (!first) return;
-    setForm((prev) => (prev.lokasiKos ? prev : { ...prev, lokasiKos: first }));
-  }, [formLokasiOptions, lokasiUnitNotApplicable]);
 
   useEffect(() => {
     const labels = effectivePosOptions.map((p) => p.label);
@@ -1063,13 +1124,20 @@ export default function FinancePageClient({
     setForm((prev) => (labels.includes(prev.pos) ? prev : { ...prev, pos: labels[0] }));
   }, [effectivePosOptions]);
 
+  /** Jika lokasi kosong / berubah dan unit tidak lagi valid untuk lokasi itu, kosongkan unit. */
   useEffect(() => {
     if (lokasiUnitNotApplicable) return;
-    const first = formUnitOptions[0] ?? "";
-    if (!form.unitBlok || !formUnitOptions.includes(form.unitBlok)) {
-      setForm((prev) => ({ ...prev, unitBlok: first }));
+    if (!isValidRealLokasiForPengeluaranKos(form.lokasiKos)) {
+      if (form.unitBlok) setForm((prev) => ({ ...prev, unitBlok: "" }));
+      return;
     }
-  }, [form.lokasiKos, formUnitOptions, lokasiUnitNotApplicable]);
+    if (
+      form.unitBlok &&
+      (!isValidRealUnitForPengeluaranKos(form.unitBlok) || !formUnitOptions.includes(form.unitBlok))
+    ) {
+      setForm((prev) => ({ ...prev, unitBlok: "" }));
+    }
+  }, [form.lokasiKos, form.unitBlok, formUnitOptions, lokasiUnitNotApplicable]);
 
   useEffect(() => {
     if (!lokasiUnitNotApplicable) return;
@@ -1173,19 +1241,61 @@ export default function FinancePageClient({
       return true;
     }
 
-    const [{ data: financeRows, error: financeError }, { data: kategoriRows, error: kategoriError }] =
-      await Promise.all([
-        supabase.from("finance").select("*").order("updated_at", { ascending: false }),
-        supabase
-          .from("finance_kategori")
-          .select("id, nama_pos, tipe, pengeluaran_scope, pemasukan_scope, pemasukan_kind"),
-      ]);
+    const [
+      { data: financeRows, error: financeError },
+      { data: kategoriRows, error: kategoriError },
+      { data: lokasiMasterRows },
+      { data: blokMasterRows },
+      { data: kamarRows },
+    ] = await Promise.all([
+      supabase.from("finance").select("*").order("updated_at", { ascending: false }),
+      supabase
+        .from("finance_kategori")
+        .select("id, nama_pos, tipe, pengeluaran_scope, pemasukan_scope, pemasukan_kind"),
+      supabase.from("master_lokasi").select("id, nama_lokasi"),
+      supabase.from("master_blok").select("lokasi_id, nama_blok"),
+      supabase.from("kamar").select("lokasi_kos, unit_blok"),
+    ]);
 
     if (financeError) {
       setErrorMessage(financeError.message);
       setIsLoading(false);
       return false;
     }
+
+    setCloudMasterLokasi(
+      (lokasiMasterRows ?? [])
+        .map((row) => {
+          const rec = row as Record<string, unknown>;
+          return {
+            id: String(rec.id ?? ""),
+            namaLokasi: String(rec.nama_lokasi ?? "").trim(),
+          };
+        })
+        .filter((r) => r.id && r.namaLokasi)
+    );
+    setCloudMasterBlok(
+      (blokMasterRows ?? [])
+        .map((row) => {
+          const rec = row as Record<string, unknown>;
+          return {
+            lokasiId: String(rec.lokasi_id ?? ""),
+            namaBlok: String(rec.nama_blok ?? "").trim(),
+          };
+        })
+        .filter((r) => r.lokasiId && r.namaBlok)
+    );
+    setCloudKamarLocUnit(
+      (kamarRows ?? [])
+        .map((row) => {
+          const rec = row as Record<string, unknown>;
+          return {
+            lokasiKos: String(rec.lokasi_kos ?? "").trim(),
+            unitBlok: String(rec.unit_blok ?? "").trim(),
+          };
+        })
+        .filter((r) => r.lokasiKos || r.unitBlok)
+    );
 
     if (!kategoriError && kategoriRows && kategoriRows.length > 0) {
       setCloudPosOptions(
@@ -1445,7 +1555,6 @@ export default function FinancePageClient({
   };
 
   const resetForm = () => {
-    const lokasiAwal = formLokasiOptions[0] ?? "";
     const nextNotaDigits = suggestNextSrNotaDigits(financeData);
     setFinanceNotaDigits(nextNotaDigits);
     setPengeluaranScopeFilter("kos");
@@ -1455,7 +1564,7 @@ export default function FinancePageClient({
       pos: getDefaultPosForKategori("Pemasukan"),
       tanggal: new Date().toISOString().slice(0, 10),
       namaPenghuni: "",
-      lokasiKos: lokasiAwal,
+      lokasiKos: PLACEHOLDER_LOKASI_PICK,
       unitBlok: "",
       nominal: "",
       keterangan: "",
@@ -1468,20 +1577,27 @@ export default function FinancePageClient({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (financeSubmitLockRef.current || isSubmitting) return;
+    financeSubmitLockRef.current = true;
     setIsSubmitting(true);
     setInfoMessage("");
     setErrorMessage("");
 
+    const unlockSubmit = () => {
+      financeSubmitLockRef.current = false;
+      setIsSubmitting(false);
+    };
+
     if (!form.pos.trim()) {
       toast("Pilih POS terlebih dahulu (Master Data / finance_kategori).", "error");
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
 
     const nominalAngka = parseRupiahToNumber(form.nominal);
     if (!form.nominal.trim() || nominalAngka <= 0) {
       toast("Isi nominal Rupiah lebih dari 0.", "error");
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
 
@@ -1493,7 +1609,7 @@ export default function FinancePageClient({
           : "Isi nomor nota setelah SR (hanya angka).",
         "error"
       );
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
 
@@ -1507,7 +1623,7 @@ export default function FinancePageClient({
       const dupMsg = financeNotaTakenMessage(notaTrimmed);
       setErrorMessage(dupMsg);
       toast(dupMsg, "error");
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
 
@@ -1520,9 +1636,10 @@ export default function FinancePageClient({
       effectiveKategori === "Pengeluaran"
         ? posMeta?.pengeluaranScope ?? normalizePengeluaranScope(undefined)
         : null;
-    const skipLocUnit =
+    /** Samakan dengan UI: jika tipe Kos tampilkan lokasi/unit, maka wajib diisi. */
+    const omitLocUnit =
       effectiveKategori === "Pengeluaran" &&
-      pengeluaranFormSkipsLocationUnit(normalizePengeluaranScope(resolvedPengeluaranScope));
+      pengeluaranFormSkipsLocationUnit(pengeluaranScopeFilter);
     const resolvedPemasukanScope: PemasukanScope | null =
       effectiveKategori === "Pemasukan"
         ? (posMeta?.pemasukanScope ??
@@ -1541,29 +1658,24 @@ export default function FinancePageClient({
                 : "lain"))
         : null;
 
-    if (
-      effectiveKategori === "Pengeluaran" &&
-      !skipLocUnit &&
-      !isValidRealLokasiForPengeluaranKos(form.lokasiKos)
-    ) {
-      toast(
-        "Untuk pengeluaran kos, lokasi wajib diisi. Tambah lokasi di Master atau pastikan ada data lokasi dari transaksi/kamar.",
-        "error"
-      );
-      setIsSubmitting(false);
-      return;
-    }
-    if (
-      effectiveKategori === "Pengeluaran" &&
-      !skipLocUnit &&
-      !isValidRealUnitForPengeluaranKos(form.unitBlok)
-    ) {
-      toast(
-        "Untuk pengeluaran kos, blok/unit wajib diisi. Pilih lokasi yang punya unit, atau tambah data kamar/blok untuk lokasi tersebut.",
-        "error"
-      );
-      setIsSubmitting(false);
-      return;
+    const lokasiKosEff = String(form.lokasiKos ?? "").trim();
+    const unitBlokEff = String(form.unitBlok ?? "").trim();
+    if (!omitLocUnit) {
+      if (!isValidRealLokasiForPengeluaranKos(lokasiKosEff)) {
+        toast("Pilih lokasi kos terlebih dahulu.", "error");
+        unlockSubmit();
+        return;
+      }
+      if (!isValidRealUnitForPengeluaranKos(unitBlokEff)) {
+        toast(
+          formUnitOptions.length === 0
+            ? "Belum ada blok/unit untuk lokasi ini. Tambah data di Master/Kamar."
+            : "Pilih blok/unit untuk lokasi yang dipilih.",
+          "error"
+        );
+        unlockSubmit();
+        return;
+      }
     }
 
     const payloadCloud: Record<string, unknown> = {
@@ -1572,8 +1684,8 @@ export default function FinancePageClient({
       pos: form.pos,
       tanggal: form.tanggal,
       nama_penghuni: form.namaPenghuni || null,
-      lokasi_kos: skipLocUnit ? null : form.lokasiKos || null,
-      unit_blok: skipLocUnit ? null : form.unitBlok || null,
+      lokasi_kos: omitLocUnit ? null : lokasiKosEff || null,
+      unit_blok: omitLocUnit ? null : unitBlokEff || null,
       nominal: nominalAngka,
       keterangan: form.keterangan,
       pengeluaran_scope: effectiveKategori === "Pengeluaran" ? resolvedPengeluaranScope : null,
@@ -1593,8 +1705,8 @@ export default function FinancePageClient({
         pemasukanKind: effectiveKategori === "Pemasukan" ? resolvedPemasukanKind : null,
         tanggal: form.tanggal,
         namaPenghuni: form.namaPenghuni,
-        lokasiKos: skipLocUnit ? "" : form.lokasiKos,
-        unitBlok: skipLocUnit ? "" : form.unitBlok,
+        lokasiKos: omitLocUnit ? "" : lokasiKosEff,
+        unitBlok: omitLocUnit ? "" : unitBlokEff,
         nominal: String(nominalAngka),
         keterangan: form.keterangan,
         pelaporanBulan: pelaporanSql ?? undefined,
@@ -1609,7 +1721,7 @@ export default function FinancePageClient({
       toast(editingId ? "Data finance berhasil diperbarui." : "Transaksi berhasil disimpan.", "success");
       resetForm();
       setShowPaymentForm(false);
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
 
@@ -1621,7 +1733,7 @@ export default function FinancePageClient({
     if (dupCloudError) {
       setErrorMessage(dupCloudError.message);
       toast(dupCloudError.message, "error");
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
     const mappedDup = (dupCloudRows ?? []).map((raw) => {
@@ -1643,7 +1755,7 @@ export default function FinancePageClient({
       setErrorMessage(dupMsg);
       setRemoteNotaConflictMessage(dupMsg);
       toast(dupMsg, "error");
-      setIsSubmitting(false);
+      unlockSubmit();
       return;
     }
 
@@ -1652,7 +1764,7 @@ export default function FinancePageClient({
       if (error) {
         setErrorMessage(error.message);
         toast(error.message, "error");
-        setIsSubmitting(false);
+        unlockSubmit();
         return;
       }
       toast("Data finance berhasil diperbarui.", "success");
@@ -1661,7 +1773,7 @@ export default function FinancePageClient({
       if (error) {
         setErrorMessage(error.message);
         toast(error.message, "error");
-        setIsSubmitting(false);
+        unlockSubmit();
         return;
       }
       toast("Transaksi berhasil disimpan.", "success");
@@ -1670,7 +1782,7 @@ export default function FinancePageClient({
     await loadFinanceData();
     resetForm();
     setShowPaymentForm(false);
-    setIsSubmitting(false);
+    unlockSubmit();
   };
 
   const handleEdit = (row: FinanceRow) => {
@@ -2515,20 +2627,34 @@ export default function FinancePageClient({
               <select
                 value={lokasiUnitNotApplicable ? "" : form.lokasiKos}
                 disabled={lokasiUnitNotApplicable}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, lokasiKos: event.target.value, unitBlok: "" }))
-                }
+                onChange={(event) => {
+                  const nextLokasi = event.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    lokasiKos: nextLokasi,
+                    unitBlok: "",
+                  }));
+                }}
                 className={`${pageFieldWarmClass} disabled:cursor-not-allowed disabled:opacity-60`}
               >
-                {!lokasiUnitNotApplicable
-                  ? lokasiOptionsForSelect.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
+                {!lokasiUnitNotApplicable ? (
+                  <>
+                    <option value="">{LOKASI_PICK_LABEL}</option>
+                    {lokasiOptionsForSelect.length === 0 ? (
+                      <option value={PLACEHOLDER_LOKASI_FORM} disabled>
+                        {PLACEHOLDER_LOKASI_FORM}
                       </option>
-                    ))
-                  : (
-                      <option value="">—</option>
+                    ) : (
+                      lokasiOptionsForSelect.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))
                     )}
+                  </>
+                ) : (
+                  <option value="">—</option>
+                )}
               </select>
             </div>
             <div>
@@ -2544,19 +2670,30 @@ export default function FinancePageClient({
               </label>
               <select
                 value={lokasiUnitNotApplicable ? "" : form.unitBlok}
-                disabled={lokasiUnitNotApplicable}
+                disabled={lokasiUnitNotApplicable || !isValidRealLokasiForPengeluaranKos(form.lokasiKos)}
                 onChange={(event) => setForm((prev) => ({ ...prev, unitBlok: event.target.value }))}
                 className={`${pageFieldWarmClass} disabled:cursor-not-allowed disabled:opacity-60`}
               >
-                {!lokasiUnitNotApplicable
-                  ? unitOptionsForSelect.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))
-                  : (
-                      <option value="">—</option>
-                    )}
+                {!lokasiUnitNotApplicable ? (
+                  !isValidRealLokasiForPengeluaranKos(form.lokasiKos) ? (
+                    <option value="">{UNIT_NEED_LOKASI_LABEL}</option>
+                  ) : unitOptionsForSelect.length === 0 ? (
+                    <option value="">{PLACEHOLDER_UNIT_FORM}</option>
+                  ) : (
+                    <>
+                      {!isValidRealUnitForPengeluaranKos(form.unitBlok) ? (
+                        <option value="">{UNIT_PICK_LABEL}</option>
+                      ) : null}
+                      {unitOptionsForSelect.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </>
+                  )
+                ) : (
+                  <option value="">—</option>
+                )}
               </select>
             </div>
             <div>
