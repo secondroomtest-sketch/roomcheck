@@ -11,6 +11,8 @@ export type PenghuniListPdfRow = {
   tglCheckOut: string;
   noWa?: string;
   periodeSewa?: string;
+  /** Harga sewa per bulan (ditampilkan di tabel Stay). */
+  hargaBulanan?: string;
 };
 
 export type SurveyPdfRow = {
@@ -52,27 +54,49 @@ const ROW_H = 7;
 const HEADER_H = 7.5;
 const TITLE_H = 8;
 
+/** Booking & Check Out — + kolom No. */
 const PENGHUNI_COLS: Col[] = [
-  { label: "Nama", w: 42 },
-  { label: "Lokasi", w: 36 },
-  { label: "Unit", w: 22 },
-  { label: "Kamar", w: 18 },
-  { label: "Status", w: 34 },
-  { label: "Periode", w: 18 },
-  { label: "Check-in", w: 26 },
-  { label: "Check-out", w: 26 },
-  { label: "WA", w: 51 },
+  { label: "No.", w: 10 },
+  { label: "Nama", w: 40 },
+  { label: "Lokasi", w: 50 },
+  { label: "Unit", w: 18 },
+  { label: "Kamar", w: 14 },
+  { label: "Status", w: 28 },
+  { label: "Periode", w: 14 },
+  { label: "Check-in", w: 22 },
+  { label: "Check-out", w: 22 },
+  { label: "WA", w: 55 },
+];
+
+/** Stay — Lokasi diperlebar; harga sewa/bulan tetap ditampilkan. */
+const STAY_COLS: Col[] = [
+  { label: "No.", w: 9 },
+  { label: "Nama", w: 34 },
+  { label: "Lokasi", w: 52 },
+  { label: "Unit", w: 16 },
+  { label: "Kamar", w: 12 },
+  { label: "Status", w: 16 },
+  { label: "Harga/bln", w: 28 },
+  { label: "Periode", w: 12 },
+  { label: "Check-in", w: 20 },
+  { label: "Check-out", w: 20 },
+  { label: "WA", w: 54 },
 ];
 
 const SURVEY_COLS: Col[] = [
-  { label: "Nama", w: 48 },
-  { label: "Lokasi", w: 42 },
-  { label: "Unit", w: 28 },
-  { label: "Periode", w: 22 },
-  { label: "Rencana CI", w: 30 },
-  { label: "Negosiasi", w: 40 },
-  { label: "WA", w: 63 },
+  { label: "No.", w: 10 },
+  { label: "Nama", w: 40 },
+  { label: "Lokasi", w: 50 },
+  { label: "Unit", w: 24 },
+  { label: "Periode", w: 18 },
+  { label: "Rencana CI", w: 26 },
+  { label: "Negosiasi", w: 34 },
+  { label: "WA", w: 71 },
 ];
+
+const LINE_H = 3.5;
+const ROW_PAD_Y = 1.6;
+const MAX_WRAP_LINES = 4;
 
 const THEME_BOOKING: SectionTheme = {
   titleBg: [77, 109, 255],
@@ -115,6 +139,14 @@ function text(v: string | undefined | null): string {
   return s || "—";
 }
 
+function formatHargaBulananPdf(v: string | undefined | null): string {
+  const digits = String(v ?? "").replace(/\D/g, "");
+  if (!digits) return "—";
+  const n = Number(digits);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  return `Rp ${n.toLocaleString("id-ID")}`;
+}
+
 function colStarts(cols: Col[]): number[] {
   const xs: number[] = [];
   let x = MARGIN_X + 2;
@@ -134,6 +166,64 @@ function clipCell(doc: jsPDF, value: string, maxW: number): string {
     out = out.slice(0, -1);
   }
   return `${out}${ellipsis}`;
+}
+
+/** Pecah teks ke beberapa baris agar tidak terpotong (nama/lokasi panjang). */
+function wrapTextLines(doc: jsPDF, value: string, maxW: number, maxLines = MAX_WRAP_LINES): string[] {
+  const raw = text(value);
+  if (doc.getTextWidth(raw) <= maxW) return [raw];
+
+  const lines: string[] = [];
+
+  const flushCharWrapped = (word: string) => {
+    let chunk = "";
+    for (const ch of word) {
+      const trial = chunk + ch;
+      if (doc.getTextWidth(trial) <= maxW) {
+        chunk = trial;
+      } else {
+        if (chunk) lines.push(chunk);
+        chunk = ch;
+        if (lines.length >= maxLines) return;
+      }
+    }
+    if (chunk && lines.length < maxLines) lines.push(chunk);
+  };
+
+  const words = raw.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) {
+    flushCharWrapped(raw);
+    return lines.length ? lines.slice(0, maxLines) : [raw];
+  }
+
+  let current = "";
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    const trial = current ? `${current} ${word}` : word;
+    if (doc.getTextWidth(trial) <= maxW) {
+      current = trial;
+      continue;
+    }
+    if (current) {
+      lines.push(current);
+      current = "";
+      if (lines.length >= maxLines) break;
+    }
+    if (doc.getTextWidth(word) <= maxW) {
+      current = word;
+    } else {
+      flushCharWrapped(word);
+      current = "";
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+
+  return lines.length ? lines.slice(0, maxLines) : [raw];
+}
+
+function rowHeightForLineCount(lineCount: number): number {
+  const n = Math.max(1, lineCount);
+  return Math.max(ROW_H, n * LINE_H + ROW_PAD_Y * 2);
 }
 
 const PAGE_BOTTOM = 12;
@@ -208,9 +298,10 @@ function ensureRowWithRepeatedHeader(
   title: string,
   count: number,
   cols: Col[],
-  theme: SectionTheme
+  theme: SectionTheme,
+  needH = ROW_H + 1
 ): number {
-  if (!needsNewPage(doc, y, ROW_H + 1)) return y;
+  if (!needsNewPage(doc, y, needH)) return y;
   doc.addPage();
   return openTableBlock(doc, PAGE_TOP, title, count, cols, theme, true);
 }
@@ -227,50 +318,91 @@ function drawEmptyRow(doc: jsPDF, y: number, message: string, theme: SectionThem
   return y + ROW_H + 6;
 }
 
+function drawDataRow(
+  doc: jsPDF,
+  y: number,
+  cols: Col[],
+  xs: number[],
+  cells: string[],
+  theme: SectionTheme,
+  stripe: boolean
+): number {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.2);
+  const wrapped = cells.map((val, i) => wrapTextLines(doc, val, cols[i]!.w - 2.5));
+  const lineCount = Math.max(1, ...wrapped.map((lines) => lines.length));
+  const rowH = rowHeightForLineCount(lineCount);
+
+  if (stripe) {
+    doc.setFillColor(...theme.stripeBg);
+    doc.rect(MARGIN_X, y - 4.5, TABLE_WIDTH, rowH, "F");
+  }
+  doc.setDrawColor(...theme.border);
+  doc.setLineWidth(0.15);
+  doc.line(MARGIN_X, y - 4.5 + rowH, MARGIN_X + TABLE_WIDTH, y - 4.5 + rowH);
+
+  doc.setTextColor(35, 35, 40);
+  wrapped.forEach((lines, i) => {
+    lines.forEach((line, li) => {
+      doc.text(line, xs[i]!, y - 4.5 + ROW_PAD_Y + 2.4 + li * LINE_H);
+    });
+  });
+  return y + rowH;
+}
+
 function drawPenghuniSection(
   doc: jsPDF,
   y: number,
   title: string,
   rows: PenghuniListPdfRow[],
   emptyLabel: string,
-  theme: SectionTheme
+  theme: SectionTheme,
+  opts?: { showHargaBulanan?: boolean }
 ): number {
-  y = openTableBlock(doc, y, title, rows.length, PENGHUNI_COLS, theme);
-  const xs = colStarts(PENGHUNI_COLS);
+  const cols = opts?.showHargaBulanan ? STAY_COLS : PENGHUNI_COLS;
+  y = openTableBlock(doc, y, title, rows.length, cols, theme);
+  const xs = colStarts(cols);
 
   if (rows.length === 0) {
     return drawEmptyRow(doc, y, emptyLabel, theme);
   }
 
   rows.forEach((row, idx) => {
-    y = ensureRowWithRepeatedHeader(doc, y, title, rows.length, PENGHUNI_COLS, theme);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.2);
-    if (idx % 2 === 1) {
-      doc.setFillColor(...theme.stripeBg);
-      doc.rect(MARGIN_X, y - 4.5, TABLE_WIDTH, ROW_H, "F");
-    }
-    doc.setDrawColor(...theme.border);
-    doc.setLineWidth(0.15);
-    doc.line(MARGIN_X, y - 4.5 + ROW_H, MARGIN_X + TABLE_WIDTH, y - 4.5 + ROW_H);
-
-    doc.setTextColor(35, 35, 40);
-    const cells = [
-      text(row.namaLengkap),
-      text(row.lokasiKos),
-      text(row.unitBlok),
-      text(row.noKamar),
-      formatPenghuniStatusLabel(row.status),
-      text(row.periodeSewa ? `${row.periodeSewa} bln` : ""),
-      text(row.tglCheckIn),
-      text(row.tglCheckOut),
-      text(row.noWa),
-    ];
-    cells.forEach((val, i) => {
-      const col = PENGHUNI_COLS[i]!;
-      doc.text(clipCell(doc, val, col.w - 2.5), xs[i]!, y + 0.8);
-    });
-    y += ROW_H;
+    const cells = opts?.showHargaBulanan
+      ? [
+          String(idx + 1),
+          text(row.namaLengkap),
+          text(row.lokasiKos),
+          text(row.unitBlok),
+          text(row.noKamar),
+          formatPenghuniStatusLabel(row.status),
+          formatHargaBulananPdf(row.hargaBulanan),
+          text(row.periodeSewa ? `${row.periodeSewa} bln` : ""),
+          text(row.tglCheckIn),
+          text(row.tglCheckOut),
+          text(row.noWa),
+        ]
+      : [
+          String(idx + 1),
+          text(row.namaLengkap),
+          text(row.lokasiKos),
+          text(row.unitBlok),
+          text(row.noKamar),
+          formatPenghuniStatusLabel(row.status),
+          text(row.periodeSewa ? `${row.periodeSewa} bln` : ""),
+          text(row.tglCheckIn),
+          text(row.tglCheckOut),
+          text(row.noWa),
+        ];
+    const previewLines = Math.max(
+      1,
+      ...cells.map((val, i) => wrapTextLines(doc, val, cols[i]!.w - 2.5).length)
+    );
+    const needH = rowHeightForLineCount(previewLines) + 1;
+    y = ensureRowWithRepeatedHeader(doc, y, title, rows.length, cols, theme, needH);
+    y = drawDataRow(doc, y, cols, xs, cells, theme, idx % 2 === 1);
   });
 
   return y + 7;
@@ -286,19 +418,10 @@ function drawSurveySection(doc: jsPDF, y: number, rows: SurveyPdfRow[], theme: S
   }
 
   rows.forEach((row, idx) => {
-    y = ensureRowWithRepeatedHeader(doc, y, title, rows.length, SURVEY_COLS, theme);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.2);
-    if (idx % 2 === 1) {
-      doc.setFillColor(...theme.stripeBg);
-      doc.rect(MARGIN_X, y - 4.5, TABLE_WIDTH, ROW_H, "F");
-    }
-    doc.setDrawColor(...theme.border);
-    doc.setLineWidth(0.15);
-    doc.line(MARGIN_X, y - 4.5 + ROW_H, MARGIN_X + TABLE_WIDTH, y - 4.5 + ROW_H);
-
-    doc.setTextColor(35, 35, 40);
     const cells = [
+      String(idx + 1),
       text(row.namaLengkap),
       text(row.lokasiKos),
       text(row.unitBlok),
@@ -307,11 +430,13 @@ function drawSurveySection(doc: jsPDF, y: number, rows: SurveyPdfRow[], theme: S
       text(row.negosiasiHarga),
       text(row.noWa),
     ];
-    cells.forEach((val, i) => {
-      const col = SURVEY_COLS[i]!;
-      doc.text(clipCell(doc, val, col.w - 2.5), xs[i]!, y + 0.8);
-    });
-    y += ROW_H;
+    const previewLines = Math.max(
+      1,
+      ...cells.map((val, i) => wrapTextLines(doc, val, SURVEY_COLS[i]!.w - 2.5).length)
+    );
+    const needH = rowHeightForLineCount(previewLines) + 1;
+    y = ensureRowWithRepeatedHeader(doc, y, title, rows.length, SURVEY_COLS, theme, needH);
+    y = drawDataRow(doc, y, SURVEY_COLS, xs, cells, theme, idx % 2 === 1);
   });
 
   return y + 7;
@@ -360,7 +485,9 @@ export function downloadPenghuniListsPdf(args: DownloadArgs): void {
     "Tidak ada data Booking.",
     THEME_BOOKING
   );
-  y = drawPenghuniSection(doc, y, "2. Penghuni Stay", args.stayRows, "Tidak ada data Stay.", THEME_STAY);
+  y = drawPenghuniSection(doc, y, "2. Penghuni Stay", args.stayRows, "Tidak ada data Stay.", THEME_STAY, {
+    showHargaBulanan: true,
+  });
   y = drawPenghuniSection(
     doc,
     y,

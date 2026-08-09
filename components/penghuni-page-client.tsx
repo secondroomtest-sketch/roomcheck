@@ -2682,6 +2682,7 @@ export default function PenghuniPageClient({
                       tglCheckOut: r.tglCheckOut,
                       noWa: r.noWa,
                       periodeSewa: r.periodeSewa,
+                      hargaBulanan: r.hargaBulanan,
                     });
                     downloadPenghuniListsPdf({
                       bookingRows: filteredData.filter((r) => r.status === "Booking").map(toPdfRow),

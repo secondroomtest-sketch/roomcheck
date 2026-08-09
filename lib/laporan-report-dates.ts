@@ -16,6 +16,20 @@ export function financeRowInYmdInclusiveRange(row: { tanggal: string }, startYmd
   return rowDate >= start && rowDate <= end;
 }
 
+/**
+ * Filter by Bulan P&L: pakai `pelaporanBulan` jika ada, selain itu fallback ke `tanggal` transaksi
+ * (selaras agregrasi P&L dashboard).
+ */
+export function financeRowInPelaporanYmdInclusiveRange(
+  row: { tanggal: string; pelaporanBulan?: string },
+  startYmd: string,
+  endYmd: string
+): boolean {
+  const pb = String(row.pelaporanBulan ?? "").trim().slice(0, 10);
+  const key = /^\d{4}-\d{2}-\d{2}$/.test(pb) ? pb : String(row.tanggal ?? "").trim().slice(0, 10);
+  return financeRowInYmdInclusiveRange({ tanggal: key }, startYmd, endYmd);
+}
+
 export function monthKeyFromYmd(dateString: string): string {
   const parsed = parseYmdLocal(dateString);
   if (Number.isNaN(parsed.getTime())) return "";

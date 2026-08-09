@@ -64,7 +64,12 @@ import {
 } from "@/lib/laporan-finance-breakdown";
 import { computeMonthlyChartData } from "@/lib/laporan-monthly-chart-data";
 import { openLaporanCetakTabWithPayload } from "@/lib/laporan-open-cetak-tab";
-import { financeRowInYmdInclusiveRange, ymdRangeInvalidOrTooLong } from "@/lib/laporan-report-dates";
+import {
+  financeRowInPelaporanYmdInclusiveRange,
+  financeRowInYmdInclusiveRange,
+  parseYmdLocal,
+  ymdRangeInvalidOrTooLong,
+} from "@/lib/laporan-report-dates";
 import { openFinanceInvoiceTab } from "@/lib/finance-open-invoice-tab";
 import { fetchKamarPenghuniSurveyForLaporanExport } from "@/lib/laporan-side-export-load";
 import {
@@ -173,14 +178,48 @@ function isSewaKamarPemasukanRow(row: FinanceRow): boolean {
   return row.kategori === "Pemasukan" && isPosSewaKamar(row.pos);
 }
 
+/** Urutkan riwayat: tanggal input payment terbaru di atas. */
 function sortFinanceRowsDesc(rows: FinanceRow[]): FinanceRow[] {
   return [...rows].sort((a, b) => {
-    const ud = String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
-    if (ud !== 0) return ud;
     const td = String(b.tanggal || "").localeCompare(String(a.tanggal || ""));
     if (td !== 0) return td;
+    // Stabil untuk nota yang sama / input sehari: yang terakhir diubah tetap di atas.
+    const ud = String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
+    if (ud !== 0) return ud;
     return String(b.id).localeCompare(String(a.id));
   });
+}
+
+function collectFinanceBoundaryYmds(
+  rows: FinanceRow[],
+  mode: "tanggal" | "pelaporan"
+): string[] {
+  const out: string[] = [];
+  for (const r of rows) {
+    if (mode === "pelaporan") {
+      const pb = String(r.pelaporanBulan ?? "").trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(pb)) {
+        out.push(pb);
+        continue;
+      }
+    }
+    const t = String(r.tanggal ?? "").trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) out.push(t);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+/** Jika rentang > 1 tahun, geser mulai agar tetap valid (akhir tetap). */
+function clampYmdRangeToMaxYear(startYmd: string, endYmd: string): { start: string; end: string } {
+  if (!ymdRangeInvalidOrTooLong(startYmd, endYmd)) return { start: startYmd, end: endYmd };
+  const end = parseYmdLocal(endYmd);
+  if (Number.isNaN(end.getTime())) return { start: startYmd, end: endYmd };
+  const start = new Date(end);
+  start.setDate(start.getDate() - 365);
+  const y = start.getFullYear();
+  const m = String(start.getMonth() + 1).padStart(2, "0");
+  const d = String(start.getDate()).padStart(2, "0");
+  return { start: `${y}-${m}-${d}`, end: endYmd };
 }
 
 function sumNominalRows(rows: FinanceRow[]): number {
@@ -633,6 +672,8 @@ export default function FinancePageClient({
   const [appliedRiwayatStart, setAppliedRiwayatStart] = useState(() => financeDateDefaults.start);
   const [appliedRiwayatEnd, setAppliedRiwayatEnd] = useState(() => financeDateDefaults.end);
   const [riwayatDateInit, setRiwayatDateInit] = useState(false);
+  /** Filter periode: tanggal input payment vs bulan P&L (pelaporan). */
+  const [riwayatDateMode, setRiwayatDateMode] = useState<"tanggal" | "pelaporan">("tanggal");
   const [filterRiwayatBusy, setFilterRiwayatBusy] = useState(false);
   const [laporanModalOpen, setLaporanModalOpen] = useState(false);
   const [laporanPrepBusy, setLaporanPrepBusy] = useState(false);
@@ -674,15 +715,13 @@ export default function FinancePageClient({
 
   useEffect(() => {
     if (riwayatDateInit) return;
-    const dates = financeData
-      .map((r) => String(r.tanggal ?? "").slice(0, 10))
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort((a, b) => a.localeCompare(b));
+    const dates = collectFinanceBoundaryYmds(financeData, "tanggal");
     if (!dates.length) return;
-    setDraftRiwayatStart(dates[0]);
-    setDraftRiwayatEnd(dates[dates.length - 1]);
-    setAppliedRiwayatStart(dates[0]);
-    setAppliedRiwayatEnd(dates[dates.length - 1]);
+    const clamped = clampYmdRangeToMaxYear(dates[0]!, dates[dates.length - 1]!);
+    setDraftRiwayatStart(clamped.start);
+    setDraftRiwayatEnd(clamped.end);
+    setAppliedRiwayatStart(clamped.start);
+    setAppliedRiwayatEnd(clamped.end);
     setRiwayatDateInit(true);
   }, [financeData, riwayatDateInit]);
 
@@ -903,7 +942,10 @@ export default function FinancePageClient({
     const unitMatch = selectedUnitFilter === "Semua Blok/Unit" || row.unitBlok === selectedUnitFilter;
     const katMatch = financeRiwayatKategori === "Semua" || row.kategori === financeRiwayatKategori;
     const posMatch = financeRiwayatPos === "Semua" || row.pos === financeRiwayatPos;
-    const tanggalMatch = financeRowInYmdInclusiveRange(row, appliedRiwayatStart, appliedRiwayatEnd);
+    const tanggalMatch =
+      riwayatDateMode === "pelaporan"
+        ? financeRowInPelaporanYmdInclusiveRange(row, appliedRiwayatStart, appliedRiwayatEnd)
+        : financeRowInYmdInclusiveRange(row, appliedRiwayatStart, appliedRiwayatEnd);
     return lokasiMatch && unitMatch && katMatch && posMatch && tanggalMatch;
   });
 
@@ -1819,19 +1861,22 @@ export default function FinancePageClient({
   };
 
   const handleResetRiwayatDates = () => {
-    const dates = financeData
-      .map((r) => String(r.tanggal ?? "").slice(0, 10))
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort((a, b) => a.localeCompare(b));
+    const dates = collectFinanceBoundaryYmds(financeData, riwayatDateMode);
     if (!dates.length) {
       toast("Belum ada data finance untuk reset rentang tanggal.", "info");
       return;
     }
-    setDraftRiwayatStart(dates[0]);
-    setDraftRiwayatEnd(dates[dates.length - 1]);
-    setAppliedRiwayatStart(dates[0]);
-    setAppliedRiwayatEnd(dates[dates.length - 1]);
-    toast("Rentang tanggal direset ke seluruh periode data.", "success");
+    const clamped = clampYmdRangeToMaxYear(dates[0]!, dates[dates.length - 1]!);
+    setDraftRiwayatStart(clamped.start);
+    setDraftRiwayatEnd(clamped.end);
+    setAppliedRiwayatStart(clamped.start);
+    setAppliedRiwayatEnd(clamped.end);
+    toast(
+      riwayatDateMode === "pelaporan"
+        ? "Rentang direset sesuai Bulan P&L pada data."
+        : "Rentang direset ke seluruh periode tanggal payment.",
+      "success"
+    );
   };
 
   const handleOpenLaporanFromFinance = () => {
@@ -2028,9 +2073,21 @@ export default function FinancePageClient({
                 </span>
               ) : (
                 <span className="max-w-[18rem] truncate rounded-full bg-white/75 px-2.5 py-1 text-[10px] font-medium text-[#5c5780] ring-1 ring-[#dfe4ff]/80 dark:bg-[#252a46]/85 dark:text-[#c9d3ff] dark:ring-[#4a5690]/50 md:max-w-none">
-                  Aktif: {appliedRiwayatStart}&nbsp;→&nbsp;{appliedRiwayatEnd}
+                  Aktif ({riwayatDateMode === "pelaporan" ? "Bulan P&L" : "Tgl payment"}):{" "}
+                  {appliedRiwayatStart}&nbsp;→&nbsp;{appliedRiwayatEnd}
                 </span>
               )}
+            </div>
+            <div className="mb-3">
+              <label className={pageLabelWarmClass}>Dasar filter tanggal</label>
+              <select
+                value={riwayatDateMode}
+                onChange={(e) => setRiwayatDateMode(e.target.value === "pelaporan" ? "pelaporan" : "tanggal")}
+                className={pageFieldWarmClass}
+              >
+                <option value="tanggal">Tanggal input payment</option>
+                <option value="pelaporan">Bulan P&amp;L (pelaporan)</option>
+              </select>
             </div>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
               <div className="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
@@ -2074,8 +2131,9 @@ export default function FinancePageClient({
               </div>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-[#7a6552] dark:text-[#a89178]">
-              Tanggal di atas mengatur isi tabel. Setelah mengubah, ketuk <span className="font-semibold">Tampilkan</span>
-              . <span className="font-semibold">Reset</span> mengembalikan rentang ke seluruh data yang ada.
+              Pilih dasar filter: <span className="font-semibold">Tanggal input payment</span> (kolom Tanggal) atau{" "}
+              <span className="font-semibold">Bulan P&amp;L</span> (kolom Bulan P&amp;L / alokasi sewa per bulan). Setelah
+              mengubah, ketuk <span className="font-semibold">Tampilkan</span>.
             </p>
           </section>
         </div>
