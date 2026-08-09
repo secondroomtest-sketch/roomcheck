@@ -11,6 +11,7 @@ import {
 } from "@/lib/laporan-cetak-filters";
 import { buildEmailBodySummary } from "@/lib/laporan-export-html";
 import { LAPORAN_CARD_SURFACE_CLASSES } from "@/lib/laporan-dashboard-card-styles";
+import { formatPenghuniStatusLabel } from "@/lib/penghuni-status-label";
 
 function formatRp(n: number): string {
   return `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
@@ -512,7 +513,7 @@ export default function LaporanCetakClient() {
                     <td className="px-2 py-1.5">{row.lokasiKos}</td>
                     <td className="px-2 py-1.5">{row.unitBlok}</td>
                     <td className="px-2 py-1.5">{row.noKamar}</td>
-                    <td className="px-2 py-1.5">{row.status}</td>
+                    <td className="px-2 py-1.5">{formatPenghuniStatusLabel(row.status)}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{row.tglCheckIn}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{row.tglCheckOut}</td>
                   </tr>

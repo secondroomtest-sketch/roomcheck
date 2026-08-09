@@ -11,6 +11,7 @@ const statusToneMap: Record<string, string> = {
   stay: "bg-emerald-100 text-emerald-700 dark:bg-emerald-200 dark:text-emerald-900",
   survey: "bg-amber-100 text-amber-700 dark:bg-amber-200 dark:text-amber-900",
   history: "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100",
+  "penghuni check out": "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100",
   pemasukan: "bg-emerald-100 text-emerald-700 dark:bg-emerald-200 dark:text-emerald-900",
   "pemasukan kos": "bg-lime-100 text-lime-800 dark:bg-lime-200 dark:text-lime-900",
   "pemasukan manajemen": "bg-emerald-700 text-emerald-50 dark:bg-emerald-800 dark:text-emerald-50",
@@ -22,15 +23,22 @@ const statusToneMap: Record<string, string> = {
   refund: "bg-violet-100 text-violet-700 dark:bg-violet-200 dark:text-violet-900",
 };
 
+function statusDisplayLabel(status: string): string {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "history") return "Penghuni Check Out";
+  return status;
+}
+
 export default function StatusBadge({ status, className = "" }: StatusBadgeProps) {
   const normalized = status.trim().toLowerCase();
   const tone =
     statusToneMap[normalized] ??
     "bg-zinc-100 text-zinc-700 dark:bg-zinc-200 dark:text-zinc-900";
+  const label = statusDisplayLabel(status);
 
   return (
     <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone} ${className}`.trim()}>
-      {status}
+      {label}
     </span>
   );
 }

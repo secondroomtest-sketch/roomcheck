@@ -6,6 +6,7 @@ import {
   filterPengeluaranRowsForLaporanCetak,
 } from "@/lib/laporan-cetak-filters";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
+import { formatPenghuniStatusLabel } from "@/lib/penghuni-status-label";
 
 function esc(s: string): string {
   return String(s ?? "")
@@ -149,7 +150,7 @@ export function buildLaporanStandaloneHtml(
       <td>${esc(p.lokasiKos)}</td>
       <td>${esc(p.unitBlok)}</td>
       <td>${esc(p.noKamar)}</td>
-      <td>${esc(p.status)}</td>
+      <td>${esc(formatPenghuniStatusLabel(p.status))}</td>
       <td>${esc(p.tglCheckIn)}</td>
       <td>${esc(p.tglCheckOut)}</td>
     </tr>`

@@ -14,6 +14,7 @@ import {
   ClipboardPlus,
   ChevronDown,
   CreditCard,
+  FileDown,
   HandCoins,
   History,
   Landmark,
@@ -38,6 +39,7 @@ import BrandLoader from "@/components/ui/brand-loader";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import StatusBadge from "@/components/ui/status-badge";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
+import { downloadPenghuniListsPdf } from "@/lib/penghuni-checkout-survey-pdf";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY, newSandboxId } from "@/lib/sandbox-storage";
@@ -88,7 +90,7 @@ const PENGHUNI_STATUS_FILTER_OPTIONS: Array<{
   { value: "semua", label: "Semua", icon: LayoutList },
   { value: "Booking", label: "Booking", icon: Bookmark },
   { value: "Stay", label: "Stay", icon: BedDouble },
-  { value: "History", label: "History", icon: History },
+  { value: "History", label: "Penghuni Check Out", icon: History },
 ];
 
 function mapPenghuniStatusFromDb(raw: unknown): PenghuniStatus {
@@ -401,6 +403,7 @@ export default function PenghuniPageClient({
   const [surveyInfo, setSurveyInfo] = useState("");
   const [surveyError, setSurveyError] = useState("");
   const [viewerRole, setViewerRole] = useState("staff");
+  const [viewerDisplayName, setViewerDisplayName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1198,6 +1201,7 @@ export default function PenghuniPageClient({
   useEffect(() => {
     if (localDemoMode) {
       setViewerRole("staff");
+      setViewerDisplayName("Demo");
       return;
     }
     if (!sessionHydrated) return;
@@ -1209,11 +1213,14 @@ export default function PenghuniPageClient({
       if (!user || cancelled) return;
       const { data } = await supabase
         .from("user_profiles")
-        .select("role")
+        .select("role, full_name")
         .eq("id", user.id)
         .maybeSingle();
       if (cancelled) return;
-      setViewerRole(normalizeUserProfileRole((data as Record<string, unknown> | null)?.role));
+      const rec = data as Record<string, unknown> | null;
+      setViewerRole(normalizeUserProfileRole(rec?.role));
+      const fullName = String(rec?.full_name ?? "").trim();
+      setViewerDisplayName(fullName || String(user.email ?? "").trim() || user.id);
     };
     void loadViewerRole();
     return () => {
@@ -1890,7 +1897,7 @@ export default function PenghuniPageClient({
     const checkoutDate = new Date().toISOString().slice(0, 10);
     const ok = await confirm({
       title: "Konfirmasi check out?",
-      message: `${row.namaLengkap} akan check out dari kamar ${row.unitBlok} / ${row.noKamar}. Kamar menjadi Available dan data penghuni dipindah ke daftar history.`,
+      message: `${row.namaLengkap} akan check out dari kamar ${row.unitBlok} / ${row.noKamar}. Kamar menjadi Available dan data penghuni dipindah ke daftar Penghuni Check Out.`,
       confirmLabel: "Ya, check out",
       cancelLabel: "Batal",
     });
@@ -2532,6 +2539,51 @@ export default function PenghuniPageClient({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={() => {
+                  try {
+                    const filterBits = [
+                      selectedLokasiFilter !== "Semua Lokasi" ? `Lokasi: ${selectedLokasiFilter}` : "",
+                      selectedUnitFilter !== "Semua Blok/Unit" ? `Unit: ${selectedUnitFilter}` : "",
+                    ].filter(Boolean);
+                    const toPdfRow = (r: PenghuniRow) => ({
+                      namaLengkap: r.namaLengkap,
+                      lokasiKos: r.lokasiKos,
+                      unitBlok: r.unitBlok,
+                      noKamar: r.noKamar,
+                      status: r.status,
+                      tglCheckIn: r.tglCheckIn,
+                      tglCheckOut: r.tglCheckOut,
+                      noWa: r.noWa,
+                      periodeSewa: r.periodeSewa,
+                    });
+                    downloadPenghuniListsPdf({
+                      bookingRows: filteredData.filter((r) => r.status === "Booking").map(toPdfRow),
+                      stayRows: filteredData.filter((r) => r.status === "Stay").map(toPdfRow),
+                      checkoutRows: filteredHistoryData.map(toPdfRow),
+                      surveyRows: filteredSurveyRows.map((r) => ({
+                        namaLengkap: r.namaLengkap,
+                        lokasiKos: r.lokasiKos,
+                        unitBlok: r.unitBlok,
+                        periodeSewa: r.periodeSewa,
+                        rencanaCheckIn: r.rencanaCheckIn,
+                        noWa: r.noWa,
+                        negosiasiHarga: r.negosiasiHarga,
+                      })),
+                      filterNote: filterBits.length ? filterBits.join(" · ") : "Filter: semua lokasi/unit",
+                      downloadedBy: viewerDisplayName || "—",
+                    });
+                    toast("PDF list penghuni berhasil diunduh.", "success");
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : "Gagal mengunduh PDF.", "error");
+                  }
+                }}
+                className="btn-tactile btn-tactile-soft inline-flex items-center gap-1.5 rounded-full border border-[#7c8fd6] bg-[#eef2ff] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#3f4f9d] shadow-sm transition hover:bg-[#dde5ff] dark:border-[#5c6ba3] dark:bg-[#252b48] dark:text-[#c8d4ff] dark:hover:bg-[#2f3658]"
+              >
+                <FileDown size={14} aria-hidden />
+                Download PDF
+              </button>
+              <button
+                type="button"
                 onClick={togglePenghuniBaru}
                 className={`btn-tactile btn-tactile-soft inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-sm transition-colors ${
                   showPenghuniForm
@@ -2720,7 +2772,7 @@ export default function PenghuniPageClient({
                   <tr>
                     <td className="px-3 py-4 text-[#856948]" colSpan={7}>
                       {penghuniStatusFilter === "History"
-                        ? "Belum ada penghuni di history untuk filter ini."
+                        ? "Belum ada penghuni check out untuk filter ini."
                         : penghuniStatusFilter === "Booking"
                           ? "Belum ada penghuni Booking untuk filter ini."
                           : penghuniStatusFilter === "Stay"
@@ -2840,7 +2892,7 @@ export default function PenghuniPageClient({
 
           {penghuniStatusFilter !== "History" ? (
           <div className="mt-6 border-t border-[#e5d8c4] pt-5 dark:border-[#3d2f22]">
-            <p className="text-xs uppercase tracking-[0.22em] text-[#8b6d48] dark:text-[#b79a78]">History penghuni</p>
+            <p className="text-xs uppercase tracking-[0.22em] text-[#8b6d48] dark:text-[#b79a78]">Penghuni Check Out</p>
             <p className="mt-1 text-xs text-[#7f6344] dark:text-[#b79a78]">
               Penghuni yang sudah check out. Double klik baris untuk melihat profil arsip. Atau buka tab{" "}
               <button
@@ -2848,7 +2900,7 @@ export default function PenghuniPageClient({
                 onClick={() => setPenghuniStatusFilter("History")}
                 className="font-semibold text-[#5c4330] underline-offset-2 hover:underline dark:text-[#d9bb94]"
               >
-                History
+                Penghuni Check Out
               </button>
               .
             </p>
@@ -2866,7 +2918,7 @@ export default function PenghuniPageClient({
                   {sortedHistoryByCheckOut.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-3 py-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
-                        Belum ada penghuni di history.
+                        Belum ada penghuni check out.
                       </td>
                     </tr>
                   ) : (
@@ -3336,7 +3388,7 @@ export default function PenghuniPageClient({
               ) : null}
               {penghuniProfileRow.status === "History" ? (
                 <p className="rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-200">
-                  Penghuni ini sudah check out dan hanya tampil di daftar history.
+                  Penghuni ini sudah check out dan hanya tampil di daftar Penghuni Check Out.
                 </p>
               ) : null}
               {penghuniProfileRow.status === "Booking" ? (
