@@ -245,6 +245,18 @@ function pengeluaranFormSkipsLocationUnit(scopeFilter: PengeluaranScope): boolea
   return normalizePengeluaranScope(scopeFilter) === "manajemen";
 }
 
+function humanizeFinanceRlsError(message: string): string {
+  const m = String(message ?? "");
+  if (/row-level security|violates row-level security/i.test(m)) {
+    return (
+      "Tidak diizinkan menyimpan baris ini (kebijakan akses database). " +
+      "Untuk pengeluaran manajemen tanpa lokasi, role supervisor/manager/super admin " +
+      "perlu policy RLS terbaru di Supabase (jalankan fix_finance_rls_manajemen_null.sql)."
+    );
+  }
+  return m;
+}
+
 const PLACEHOLDER_LOKASI_FORM = "(Belum ada data lokasi)";
 const PLACEHOLDER_UNIT_FORM = "(Belum ada unit untuk lokasi ini)";
 const PLACEHOLDER_LOKASI_PICK = "";
@@ -1663,7 +1675,8 @@ export default function FinancePageClient({
     /** Samakan dengan UI: jika tipe Kos tampilkan lokasi/unit, maka wajib diisi. */
     const omitLocUnit =
       effectiveKategori === "Pengeluaran" &&
-      pengeluaranFormSkipsLocationUnit(pengeluaranScopeFilter);
+      (pengeluaranFormSkipsLocationUnit(pengeluaranScopeFilter) ||
+        normalizePengeluaranScope(resolvedPengeluaranScope) === "manajemen");
     const resolvedPemasukanScope: PemasukanScope | null =
       effectiveKategori === "Pemasukan"
         ? (posMeta?.pemasukanScope ??
@@ -1787,8 +1800,9 @@ export default function FinancePageClient({
     if (editingId) {
       const { error } = await supabase.from("finance").update(payloadCloud).eq("id", editingId);
       if (error) {
-        setErrorMessage(error.message);
-        toast(error.message, "error");
+        const msg = humanizeFinanceRlsError(error.message);
+        setErrorMessage(msg);
+        toast(msg, "error");
         unlockSubmit();
         return;
       }
@@ -1796,8 +1810,9 @@ export default function FinancePageClient({
     } else {
       const { error } = await supabase.from("finance").insert(payloadCloud);
       if (error) {
-        setErrorMessage(error.message);
-        toast(error.message, "error");
+        const msg = humanizeFinanceRlsError(error.message);
+        setErrorMessage(msg);
+        toast(msg, "error");
         unlockSubmit();
         return;
       }

@@ -56,9 +56,16 @@ create or replace function public.has_global_operational_access()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
+set row_security = off
 as $$
   select coalesce(public.current_user_role() in ('super_admin', 'manager', 'supervisor'), false)
 $$;
+
+revoke all on function public.has_global_operational_access() from public;
+grant execute on function public.has_global_operational_access() to authenticated;
+grant execute on function public.has_global_operational_access() to service_role;
 
 create or replace function public.can_audit_password_changes()
 returns boolean
@@ -349,7 +356,11 @@ to authenticated
 using (
   public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
-  or (lokasi_kos is null and unit_blok is null and public.is_owner())
+  or (
+    lokasi_kos is null
+    and unit_blok is null
+    and (public.is_owner() or public.has_global_operational_access())
+  )
 );
 
 create policy finance_insert
@@ -359,7 +370,11 @@ to authenticated
 with check (
   public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
-  or (lokasi_kos is null and unit_blok is null and public.is_owner())
+  or (
+    lokasi_kos is null
+    and unit_blok is null
+    and (public.is_owner() or public.has_global_operational_access())
+  )
 );
 
 create policy finance_update
@@ -369,12 +384,20 @@ to authenticated
 using (
   public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
-  or (lokasi_kos is null and unit_blok is null and public.is_owner())
+  or (
+    lokasi_kos is null
+    and unit_blok is null
+    and (public.is_owner() or public.has_global_operational_access())
+  )
 )
 with check (
   public.has_global_operational_access()
   or public.has_scope_access(lokasi_kos, unit_blok)
-  or (lokasi_kos is null and unit_blok is null and public.is_owner())
+  or (
+    lokasi_kos is null
+    and unit_blok is null
+    and (public.is_owner() or public.has_global_operational_access())
+  )
 );
 
 create policy finance_delete
