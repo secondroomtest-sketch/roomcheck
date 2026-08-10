@@ -75,7 +75,10 @@ type PlTableRow = {
 };
 
 function formatRp(value: number): string {
-  return `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
+  const v = Number(value);
+  const num = Number.isFinite(v) ? v : 0;
+  if (num < 0) return `−Rp ${Math.abs(num).toLocaleString("id-ID")}`;
+  return `Rp ${num.toLocaleString("id-ID")}`;
 }
 
 /** Di bawah lebar `md` (768px), legenda di dalam Recharts sering bertumpuk — pakai legenda inline. */

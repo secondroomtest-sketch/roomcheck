@@ -53,7 +53,10 @@ function filterPenghuniSurvey(
 }
 
 function formatRp(n: number): string {
-  return `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+  const v = Number(n);
+  const num = Number.isFinite(v) ? v : 0;
+  if (num < 0) return `−Rp ${Math.abs(num).toLocaleString("id-ID")}`;
+  return `Rp ${num.toLocaleString("id-ID")}`;
 }
 
 export function buildLaporanExportPayloadV1(params: {

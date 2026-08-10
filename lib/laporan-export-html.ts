@@ -17,7 +17,10 @@ function esc(s: string): string {
 }
 
 function formatRp(n: number): string {
-  return `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+  const v = Number(n);
+  const num = Number.isFinite(v) ? v : 0;
+  if (num < 0) return `−Rp ${Math.abs(num).toLocaleString("id-ID")}`;
+  return `Rp ${num.toLocaleString("id-ID")}`;
 }
 
 /** Ambil logo dari origin yang sama → data URL untuk HTML mandiri (buka dari file://). */

@@ -163,11 +163,16 @@ function filterRowsByFinanceLokasiUnit<T extends { lokasiKos: string; unitBlok: 
   );
 }
 
-/** Tampilan tabel / ringkasan: angka mentah atau terformat → Rp … */
+/** Tampilan tabel / ringkasan: angka mentah atau terformat → Rp … (minus tetap terlihat). */
 function formatNominalDisplay(raw: string): string {
-  const digits = String(raw ?? "").replace(/\D/g, "");
-  if (!digits) return raw?.trim() ? raw : "—";
-  return `Rp ${Number(digits).toLocaleString("id-ID")}`;
+  const s = String(raw ?? "").trim();
+  if (!s) return "—";
+  const asNum = Number(s);
+  const negative = Number.isFinite(asNum) ? asNum < 0 : /^-/.test(s.replace(/\s/g, ""));
+  const digits = s.replace(/\D/g, "");
+  if (!digits) return s;
+  const absFormatted = `Rp ${Number(digits).toLocaleString("id-ID")}`;
+  return negative ? `−${absFormatted}` : absFormatted;
 }
 
 function isPosSewaKamar(pos: string): boolean {
@@ -2340,7 +2345,13 @@ export default function FinancePageClient({
                 <span className="font-medium">P&amp;L kos</span>
                 {" "}
                 (sewa kamar − pengeluaran kos):{" "}
-                <span className="font-semibold tabular-nums">
+                <span
+                  className={`font-semibold tabular-nums ${
+                    plKosSewaMinusPengeluaranKos < 0
+                      ? "text-rose-700 dark:text-rose-300"
+                      : "text-[#2d2217] dark:text-[#f6e9d5]"
+                  }`}
+                >
                   {formatNominalDisplay(String(plKosSewaMinusPengeluaranKos))}
                 </span>
               </p>
@@ -2352,7 +2363,13 @@ export default function FinancePageClient({
                 <span className="font-medium">P&amp;L manajemen</span>
                 {" "}
                 (margin − pengeluaran manajemen):{" "}
-                <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-200">
+                <span
+                  className={`font-semibold tabular-nums ${
+                    plManajemenMarginMinusPengeluaran < 0
+                      ? "text-rose-700 dark:text-rose-300"
+                      : "text-emerald-800 dark:text-emerald-200"
+                  }`}
+                >
                   {formatNominalDisplay(String(plManajemenMarginMinusPengeluaran))}
                 </span>
               </p>

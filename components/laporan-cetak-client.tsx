@@ -14,7 +14,10 @@ import { LAPORAN_CARD_SURFACE_CLASSES } from "@/lib/laporan-dashboard-card-style
 import { formatPenghuniStatusLabel } from "@/lib/penghuni-status-label";
 
 function formatRp(n: number): string {
-  return `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+  const v = Number(n);
+  const num = Number.isFinite(v) ? v : 0;
+  if (num < 0) return `−Rp ${Math.abs(num).toLocaleString("id-ID")}`;
+  return `Rp ${num.toLocaleString("id-ID")}`;
 }
 
 function formatId(iso: string): string {
@@ -277,7 +280,13 @@ export default function LaporanCetakClient() {
             {fokusCetak !== "manajemen" ? (
               <div>
                 <p className="font-medium text-[#6b5238]">P&amp;L kos</p>
-                <p className="text-lg font-semibold text-[#166534]">{formatRp(s.plKosNominal)}</p>
+                <p
+                  className={`text-lg font-semibold ${
+                    s.plKosNominal < 0 ? "text-[#b91c1c]" : "text-[#166534]"
+                  }`}
+                >
+                  {formatRp(s.plKosNominal)}
+                </p>
                 <p className="text-xs text-[#6b5238]">
                   Pemasukan kos {formatRp(s.pemasukanKosTotal)} − pengeluaran kos{" "}
                   {formatRp(s.pengeluaranKosTotal)}
@@ -287,7 +296,13 @@ export default function LaporanCetakClient() {
             {fokusCetak !== "kos" ? (
               <div className={fokusCetak === undefined ? "border-t border-[#e0d2c0] pt-3" : ""}>
                 <p className="font-medium text-[#6b5238]">P&amp;L manajemen</p>
-                <p className="text-lg font-semibold text-[#047857]">{formatRp(s.plManajemenNominal)}</p>
+                <p
+                  className={`text-lg font-semibold ${
+                    s.plManajemenNominal < 0 ? "text-[#b91c1c]" : "text-[#047857]"
+                  }`}
+                >
+                  {formatRp(s.plManajemenNominal)}
+                </p>
                 <p className="text-xs text-[#6b5238]">
                   Pemasukan manajemen {formatRp(s.pemasukanManajemenTotal)} − pengeluaran manajemen{" "}
                   {formatRp(s.pengeluaranManajemenTotal)}

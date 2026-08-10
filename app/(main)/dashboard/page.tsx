@@ -1622,8 +1622,15 @@ export default function DashboardPage() {
               <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-violet-900/85 dark:text-violet-200/90 sm:text-[10px] sm:tracking-[0.14em]">
                 P&amp;L kos
               </p>
-              <p className="mt-1 text-lg font-semibold tabular-nums leading-tight text-violet-950 dark:text-violet-50 sm:text-xl">
-                Rp {dashboardPlBreakdown.plKosNominal.toLocaleString("id-ID")}
+              <p
+                className={`mt-1 text-lg font-semibold tabular-nums leading-tight sm:text-xl ${
+                  dashboardPlBreakdown.plKosNominal < 0
+                    ? "text-rose-700 dark:text-rose-300"
+                    : "text-violet-950 dark:text-violet-50"
+                }`}
+              >
+                {dashboardPlBreakdown.plKosNominal < 0 ? "−" : ""}Rp{" "}
+                {Math.abs(dashboardPlBreakdown.plKosNominal).toLocaleString("id-ID")}
               </p>
               <p className="mt-1 text-[9px] leading-snug text-violet-900/75 dark:text-violet-200/80 sm:text-[10px]">
                 Masuk kos Rp {dashboardPlBreakdown.pemasukanKosTotal.toLocaleString("id-ID")} − keluar kos Rp{" "}
@@ -1635,8 +1642,15 @@ export default function DashboardPage() {
                 <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#4d6d66] dark:text-[#9ec4bc] sm:text-[10px] sm:tracking-[0.14em]">
                   P&amp;L manajemen
                 </p>
-                <p className="mt-1 text-lg font-semibold tabular-nums leading-tight text-teal-900 dark:text-teal-100 sm:text-xl">
-                  Rp {dashboardPlBreakdown.plManajemenNominal.toLocaleString("id-ID")}
+                <p
+                  className={`mt-1 text-lg font-semibold tabular-nums leading-tight sm:text-xl ${
+                    dashboardPlBreakdown.plManajemenNominal < 0
+                      ? "text-rose-700 dark:text-rose-300"
+                      : "text-teal-900 dark:text-teal-100"
+                  }`}
+                >
+                  {dashboardPlBreakdown.plManajemenNominal < 0 ? "−" : ""}Rp{" "}
+                  {Math.abs(dashboardPlBreakdown.plManajemenNominal).toLocaleString("id-ID")}
                 </p>
                 <p className="mt-1 text-[9px] leading-snug text-[#4d6d66] dark:text-[#9ec4bc] sm:text-[10px]">
                   Masuk manajemen Rp {dashboardPlBreakdown.pemasukanManajemenTotal.toLocaleString("id-ID")} − keluar
