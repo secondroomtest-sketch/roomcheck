@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "@/libsupabaseClient";
-import { Ban, Eye, FileText, HandCoins, Plus, ReceiptText, RotateCcw, Save, Search, X } from "lucide-react";
+import { Ban, Eye, FileText, HandCoins, Pencil, Plus, ReceiptText, RotateCcw, Save, Search, X } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
 import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import BrandLoader from "@/components/ui/brand-loader";
@@ -290,6 +290,8 @@ function FinanceRiwayatTableBlock({
   isLoading,
   footerSumLabel,
   setHoverKeterangan,
+  canEditPayment,
+  onEditPayment,
   canCancelPemasukanPayment,
   onCancelPemasukanPayment,
   canCancelPengeluaranPayment,
@@ -303,6 +305,8 @@ function FinanceRiwayatTableBlock({
   isLoading: boolean;
   footerSumLabel: string;
   setHoverKeterangan: Dispatch<SetStateAction<HoverKeteranganState>>;
+  canEditPayment?: boolean;
+  onEditPayment?: (row: FinanceRow) => void;
   canCancelPemasukanPayment?: boolean;
   onCancelPemasukanPayment?: (row: FinanceRow) => void;
   canCancelPengeluaranPayment?: boolean;
@@ -386,6 +390,15 @@ function FinanceRiwayatTableBlock({
 
   const actionCellForRow = (row: FinanceRow) => (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {canEditPayment && onEditPayment ? (
+        <ActionButtonWithIcon
+          icon={Pencil}
+          label="Edit"
+          onClick={() => onEditPayment(row)}
+          className="rounded-full bg-amber-700 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-white shadow-sm hover:bg-amber-800"
+          iconClassName="text-white"
+        />
+      ) : null}
       {onRowDoubleClick ? (
         <ActionButtonWithIcon
           icon={ReceiptText}
@@ -1593,6 +1606,12 @@ export default function FinancePageClient({
       setIsSubmitting(false);
     };
 
+    if (editingId && !canSuperAdminEditFinance) {
+      toast("Hanya super admin yang dapat mengedit payment.", "error");
+      unlockSubmit();
+      return;
+    }
+
     if (!form.pos.trim()) {
       toast("Pilih POS terlebih dahulu (Master Data / finance_kategori).", "error");
       unlockSubmit();
@@ -1696,6 +1715,7 @@ export default function FinancePageClient({
       pengeluaran_scope: effectiveKategori === "Pengeluaran" ? resolvedPengeluaranScope : null,
       pemasukan_scope: effectiveKategori === "Pemasukan" ? resolvedPemasukanScope : null,
       pemasukan_kind: effectiveKategori === "Pemasukan" ? resolvedPemasukanKind : null,
+      pelaporan_bulan: pelaporanSql,
     };
 
     if (localDemoMode) {
@@ -1791,6 +1811,10 @@ export default function FinancePageClient({
   };
 
   const handleEdit = (row: FinanceRow) => {
+    if (!canSuperAdminEditFinance) {
+      toast("Hanya super admin yang dapat mengedit payment.", "error");
+      return;
+    }
     setShowPaymentForm(true);
     setEditingId(row.id);
     if (row.kategori === "Pengeluaran") {
@@ -1814,8 +1838,9 @@ export default function FinancePageClient({
       paymentSplitGroupId: row.paymentSplitGroupId ?? "",
     });
     setFinanceNotaDigits(sanitizeSrNotaDigits(String(row.noNota ?? "").replace(/^SR/i, "")));
-    setInfoMessage("Mode edit finance aktif.");
+    setInfoMessage("Mode edit payment aktif (super admin).");
     setErrorMessage("");
+    setRemoteNotaConflictMessage("");
   };
 
   const handleDelete = async (row: FinanceRow): Promise<boolean> => {
@@ -2054,6 +2079,7 @@ export default function FinancePageClient({
   };
 
   const canSuperAdminCancelFinance = normalizeUserProfileRole(viewerRole) === "super_admin";
+  const canSuperAdminEditFinance = canSuperAdminCancelFinance;
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 pb-10">
@@ -2260,6 +2286,13 @@ export default function FinancePageClient({
           <p className="mb-4 text-[11px] leading-relaxed text-[#7f6344] sm:mb-5 sm:text-xs dark:text-[#b79a78]">
             Klik baris atau tombol <span className="font-semibold text-[#5c4330] dark:text-[#d9bc95]">Invoice</span>{" "}
             untuk membuka faktur Second Room (print atau unduh PDF).
+            {canSuperAdminEditFinance ? (
+              <>
+                {" "}
+                Super admin: gunakan <span className="font-semibold text-[#5c4330] dark:text-[#d9bc95]">Edit</span> untuk
+                mengubah payment lewat form.
+              </>
+            ) : null}
           </p>
           {filterRiwayatBusy ? (
             <div
@@ -2285,6 +2318,8 @@ export default function FinancePageClient({
             isLoading={isLoading}
             footerSumLabel="Total pemasukan sewa kamar — basis P&L (SUM nominal)"
             setHoverKeterangan={setHoverKeterangan}
+            canEditPayment={canSuperAdminEditFinance}
+            onEditPayment={handleEdit}
             canCancelPemasukanPayment={canSuperAdminCancelFinance}
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
@@ -2299,6 +2334,8 @@ export default function FinancePageClient({
             isLoading={isLoading}
             footerSumLabel="Total margin manajemen (SUM nominal)"
             setHoverKeterangan={setHoverKeterangan}
+            canEditPayment={canSuperAdminEditFinance}
+            onEditPayment={handleEdit}
             canCancelPemasukanPayment={canSuperAdminCancelFinance}
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
@@ -2314,6 +2351,8 @@ export default function FinancePageClient({
             footerSumLabel="Total pengeluaran kos (SUM nominal)"
             footerSumTone="expense"
             setHoverKeterangan={setHoverKeterangan}
+            canEditPayment={canSuperAdminEditFinance}
+            onEditPayment={handleEdit}
             canCancelPemasukanPayment={canSuperAdminCancelFinance}
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
@@ -2329,6 +2368,8 @@ export default function FinancePageClient({
             footerSumLabel="Total pengeluaran manajemen (SUM nominal)"
             footerSumTone="expense"
             setHoverKeterangan={setHoverKeterangan}
+            canEditPayment={canSuperAdminEditFinance}
+            onEditPayment={handleEdit}
             canCancelPemasukanPayment={canSuperAdminCancelFinance}
             onCancelPemasukanPayment={cancelPaymentWithConfirm}
             canCancelPengeluaranPayment={canSuperAdminCancelFinance}
@@ -2423,12 +2464,14 @@ export default function FinancePageClient({
                   </p>
                   <SectionTitleWithIcon
                     icon={ReceiptText}
-                    title="Input Payment"
+                    title={editingId ? "Edit Payment" : "Input Payment"}
                     iconClassName={iconTone.info}
                     className="mt-2 text-2xl text-[#2c2218] dark:text-[#f5e8d4]"
                   />
                   <p className="mt-2 text-sm text-[#7f6344] dark:text-[#b79a78]">
-                    Isi transaksi pemasukan/pengeluaran dari panel samping ini.
+                    {editingId
+                      ? "Ubah data transaksi ini, lalu simpan dengan Update Payment."
+                      : "Isi transaksi pemasukan/pengeluaran dari panel samping ini."}
                   </p>
                 </div>
                 <button
