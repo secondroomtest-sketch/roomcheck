@@ -60,6 +60,8 @@ export type KamarRow = {
   tglCheckOut: string;
 };
 
+type KamarForm = Omit<KamarRow, "id" | "namaPenghuni" | "tglCheckOut">;
+
 function normalizeMasterName(value: string): string {
   return String(value ?? "")
     .trim()
