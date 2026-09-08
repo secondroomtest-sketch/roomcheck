@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import PenghuniPageClient, { PenghuniRow } from "@/components/penghuni-page-client";
-import { sanitizePenghuniPaymentFlags } from "@/lib/penghuni-finance-payment-sync";
+import { mapPenghuniDbRowToUi } from "@/lib/penghuni-map-db";
 import type { KamarRow } from "@/components/kamar-page-client";
 
 function mapKamarDbToUi(row: Record<string, unknown>): KamarRow {
@@ -19,42 +19,6 @@ function mapKamarDbToUi(row: Record<string, unknown>): KamarRow {
   };
 }
 
-function mapPenghuniStatusFromDb(raw: unknown): PenghuniRow["status"] {
-  const s = String(raw ?? "Booking").trim().toLowerCase();
-  if (s === "stay") return "Stay";
-  if (s === "history") return "History";
-  return "Booking";
-}
-
-function mapDbRowToUi(row: Record<string, unknown>): PenghuniRow {
-  const status = mapPenghuniStatusFromDb(row.status);
-
-  const mapped: PenghuniRow = {
-    id: String(row.id ?? ""),
-    namaLengkap: String(row.nama_lengkap ?? ""),
-    lokasiKos: String(row.lokasi_kos ?? ""),
-    unitBlok: String(row.unit_blok ?? ""),
-    noKamar: String(row.no_kamar ?? ""),
-    periodeSewa: String(row.periode_sewa_bulan ?? ""),
-    tglCheckIn: String(row.tgl_check_in ?? ""),
-    tglCheckOut: String(row.tgl_check_out ?? ""),
-    hargaBulanan: String(row.harga_bulanan ?? ""),
-    bookingFee: String(row.booking_fee ?? ""),
-    depositKamar: String(row.deposit_kamar ?? ""),
-    noWa: String(row.no_wa ?? ""),
-    status,
-    keterangan: String(row.keterangan ?? ""),
-    sewaKamarPaid: Boolean(row.sewa_kamar_paid),
-    sewaKamarNota: String(row.sewa_kamar_nota ?? ""),
-    bookingFeePaid: Boolean(row.booking_fee_paid),
-    bookingFeeNota: String(row.booking_fee_nota ?? ""),
-    depositKamarPaid: Boolean(row.deposit_kamar_paid),
-    depositKamarNota: String(row.deposit_kamar_nota ?? ""),
-    createdAt: row.created_at ? String(row.created_at) : null,
-  };
-  return sanitizePenghuniPaymentFlags(mapped);
-}
-
 export default async function PenghuniPage() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -68,7 +32,9 @@ export default async function PenghuniPage() {
       .select("*")
       .order("created_at", { ascending: false });
 
-    initialData = (data ?? []).map((row) => mapDbRowToUi(row as Record<string, unknown>));
+    initialData = (data ?? [])
+      .filter((row) => String((row as Record<string, unknown>).status ?? "").toLowerCase() !== "survey")
+      .map((row) => mapPenghuniDbRowToUi(row as Record<string, unknown>));
 
     const { data: kamarData } = await client
       .from("kamar")

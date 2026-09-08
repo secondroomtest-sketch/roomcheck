@@ -29,7 +29,6 @@ import {
   clearPenghuniPaymentLinkedToFinanceRow,
   countFinanceRowsWithSameNotaAndPosKind,
   FINANCE_POS_SEWA_KAMAR,
-  isBookingFeeFinancePos,
   isDepositFinancePos,
   isSewaKamarFinancePos,
 } from "@/lib/penghuni-finance-payment-sync";
@@ -1907,16 +1906,16 @@ export default function FinancePageClient({
       });
       const remainingLinked = countFinanceRowsWithSameNotaAndPosKind(mappedLeft, { noNota: nota, pos: row.pos });
       if (remainingLinked === 0) {
+        // Booking fee dicatat sebagai POS Sewa kamar — cabut flag BF lewat nota, bukan hanya label POS.
+        await supabase
+          .from("penghuni")
+          .update({ booking_fee_paid: false, booking_fee_nota: null })
+          .eq("booking_fee_nota", nota);
         if (isSewaKamarFinancePos(row.pos)) {
           await supabase
             .from("penghuni")
             .update({ sewa_kamar_paid: false, sewa_kamar_nota: null })
             .eq("sewa_kamar_nota", nota);
-        } else if (isBookingFeeFinancePos(row.pos)) {
-          await supabase
-            .from("penghuni")
-            .update({ booking_fee_paid: false, booking_fee_nota: null })
-            .eq("booking_fee_nota", nota);
         } else if (isDepositFinancePos(row.pos)) {
           await supabase
             .from("penghuni")

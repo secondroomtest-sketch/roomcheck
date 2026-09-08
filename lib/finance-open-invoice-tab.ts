@@ -46,6 +46,8 @@ type PenghuniStaySlice = {
   tgl_check_out?: string | null;
   sewaKamarNota?: string;
   sewa_kamar_nota?: string | null;
+  bookingFeeNota?: string;
+  booking_fee_nota?: string | null;
 };
 
 function norm(v: unknown): string {
@@ -76,9 +78,11 @@ function matchPenghuniForInvoice(
   const lokasi = norm(row.lokasiKos);
   const unit = norm(row.unitBlok);
 
-  if (nota && isSewaKamarFinancePos(row.pos ?? "")) {
-    const byNota = list.find((p) => String(p.sewaKamarNota ?? p.sewa_kamar_nota ?? "").trim() === nota);
-    if (byNota) return byNota;
+  if (nota && (isSewaKamarFinancePos(row.pos ?? "") || isBookingFeeFinancePos(row.pos ?? ""))) {
+    const bySewaNota = list.find((p) => String(p.sewaKamarNota ?? p.sewa_kamar_nota ?? "").trim() === nota);
+    if (bySewaNota) return bySewaNota;
+    const byBfNota = list.find((p) => String(p.bookingFeeNota ?? p.booking_fee_nota ?? "").trim() === nota);
+    if (byBfNota) return byBfNota;
   }
 
   if (nama) {
@@ -120,13 +124,19 @@ export async function resolvePenghuniStayDatesForInvoice(
     const nota = String(row.noNota ?? "").trim();
     const nama = String(row.namaPenghuni ?? "").trim();
 
-    if (nota && isSewaKamarFinancePos(row.pos)) {
-      const { data, error } = await supabase
+    if (nota && (isSewaKamarFinancePos(row.pos) || isBookingFeeFinancePos(row.pos))) {
+      const { data: bySewa, error: sewaErr } = await supabase
         .from("penghuni")
-        .select("nama_lengkap, lokasi_kos, unit_blok, tgl_check_in, tgl_check_out, sewa_kamar_nota")
+        .select("nama_lengkap, lokasi_kos, unit_blok, tgl_check_in, tgl_check_out, sewa_kamar_nota, booking_fee_nota")
         .eq("sewa_kamar_nota", nota)
         .maybeSingle();
-      if (!error && data) return pickStayDates(data as PenghuniStaySlice);
+      if (!sewaErr && bySewa) return pickStayDates(bySewa as PenghuniStaySlice);
+      const { data: byBf, error: bfErr } = await supabase
+        .from("penghuni")
+        .select("nama_lengkap, lokasi_kos, unit_blok, tgl_check_in, tgl_check_out, sewa_kamar_nota, booking_fee_nota")
+        .eq("booking_fee_nota", nota)
+        .maybeSingle();
+      if (!bfErr && byBf) return pickStayDates(byBf as PenghuniStaySlice);
     }
 
     if (nama) {

@@ -60,7 +60,47 @@ export type KamarRow = {
   tglCheckOut: string;
 };
 
-type KamarForm = Omit<KamarRow, "id" | "namaPenghuni" | "tglCheckOut">;
+function normalizeMasterName(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function parseMasterId(value: unknown): string {
+  if (value && typeof value === "object") {
+    const rec = value as Record<string, unknown>;
+    return String(rec.id ?? rec.lokasi_id ?? "").trim();
+  }
+  return String(value ?? "").trim();
+}
+
+function findLokasiIdByName(map: Record<string, string>, lokasiName: string): string {
+  const raw = String(lokasiName ?? "").trim();
+  if (!raw) return "";
+  const exact = Object.entries(map).find(([, nama]) => nama === raw)?.[0];
+  if (exact) return exact;
+  const want = normalizeMasterName(raw);
+  return Object.entries(map).find(([, nama]) => normalizeMasterName(nama) === want)?.[0] ?? "";
+}
+
+function unitsForCloudLokasi(
+  lokasiName: string,
+  masterLokasiMap: Record<string, string>,
+  masterBlok: Array<{ lokasiId: string; namaBlok: string }>
+): string[] {
+  const lokasiId = findLokasiIdByName(masterLokasiMap, lokasiName);
+  if (!lokasiId) return [];
+  const idKey = lokasiId.trim().toLowerCase();
+  return Array.from(
+    new Set(
+      masterBlok
+        .filter((b) => b.lokasiId.trim().toLowerCase() === idKey)
+        .map((b) => b.namaBlok)
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, "id"));
+}
 
 function buildLokasiSelectOptions(
   localDemo: boolean,
@@ -214,32 +254,13 @@ export default function KamarPageClient({
     };
   }, []);
 
-  const cloudUnitBySelectedLokasi = useMemo(() => {
-    const getCloudUnits = (lokasiName: string) => {
-      if (!lokasiName.trim()) return [] as string[];
-      const matchedLokasiId = Object.entries(masterLokasiMapCloud).find(
-        ([, namaLokasi]) => namaLokasi === lokasiName
-      )?.[0];
-      if (!matchedLokasiId) return [] as string[];
-      return masterBlokCloud
-        .filter((b) => b.lokasiId === matchedLokasiId)
-        .map((b) => b.namaBlok)
-        .filter(Boolean);
-    };
-    return getCloudUnits(form.lokasiKos);
-  }, [form.lokasiKos, masterLokasiMapCloud, masterBlokCloud]);
+  const cloudUnitBySelectedLokasi = useMemo(
+    () => unitsForCloudLokasi(form.lokasiKos, masterLokasiMapCloud, masterBlokCloud),
+    [form.lokasiKos, masterLokasiMapCloud, masterBlokCloud]
+  );
 
-  const getCloudUnitOptionsByLokasi = (lokasiName: string) => {
-    if (!lokasiName.trim()) return [];
-    const matchedLokasiId = Object.entries(masterLokasiMapCloud).find(
-      ([, namaLokasi]) => namaLokasi === lokasiName
-    )?.[0];
-    if (!matchedLokasiId) return [];
-    return masterBlokCloud
-      .filter((b) => b.lokasiId === matchedLokasiId)
-      .map((b) => b.namaBlok)
-      .filter(Boolean);
-  };
+  const getCloudUnitOptionsByLokasi = (lokasiName: string) =>
+    unitsForCloudLokasi(lokasiName, masterLokasiMapCloud, masterBlokCloud);
 
   const lokasiSelectOptions = useMemo(
     () => buildLokasiSelectOptions(!!localDemoMode, data, penghuniSandboxRows, sandboxReady, masterLokasiCloud),
@@ -271,10 +292,20 @@ export default function KamarPageClient({
   const lokasiFilterOptions = useMemo(() => {
     const fromRooms = displayRooms.map((room) => room.lokasiKos).filter(Boolean);
     if (!localDemoMode) {
-      return Array.from(new Set(fromRooms)).sort((a, b) => a.localeCompare(b, "id"));
+      return Array.from(new Set([...masterLokasiCloud, ...fromRooms])).sort((a, b) =>
+        a.localeCompare(b, "id")
+      );
     }
     return buildDemoLokasiList(sandboxReady, displayRooms, penghuniSandboxRows);
-  }, [displayRooms, localDemoMode, masterTick, sandboxRev, sandboxReady, penghuniSandboxRows]);
+  }, [
+    displayRooms,
+    localDemoMode,
+    masterTick,
+    sandboxRev,
+    sandboxReady,
+    penghuniSandboxRows,
+    masterLokasiCloud,
+  ]);
 
   const unitFilterOptions = useMemo(() => {
     const source =
@@ -282,11 +313,30 @@ export default function KamarPageClient({
         ? displayRooms
         : displayRooms.filter((room) => room.lokasiKos === selectedLokasiFilter);
     const fromRooms = source.map((room) => room.unitBlok).filter(Boolean);
-    if (!localDemoMode || selectedLokasiFilter === "Semua Lokasi") {
+    if (!localDemoMode) {
+      const fromMaster =
+        selectedLokasiFilter === "Semua Lokasi"
+          ? masterBlokCloud.map((b) => b.namaBlok).filter(Boolean)
+          : getCloudUnitOptionsByLokasi(selectedLokasiFilter);
+      return Array.from(new Set([...fromMaster, ...fromRooms])).sort((a, b) =>
+        a.localeCompare(b, "id")
+      );
+    }
+    if (selectedLokasiFilter === "Semua Lokasi") {
       return Array.from(new Set(fromRooms)).sort((a, b) => a.localeCompare(b, "id"));
     }
     return buildDemoUnitList(sandboxReady, selectedLokasiFilter, displayRooms, penghuniSandboxRows);
-  }, [displayRooms, selectedLokasiFilter, localDemoMode, masterTick, sandboxRev, sandboxReady, penghuniSandboxRows]);
+  }, [
+    displayRooms,
+    selectedLokasiFilter,
+    localDemoMode,
+    masterTick,
+    sandboxRev,
+    sandboxReady,
+    penghuniSandboxRows,
+    masterBlokCloud,
+    masterLokasiMapCloud,
+  ]);
   const filteredRooms = useMemo(() => {
     return displayRooms.filter((room) => {
       const lokasiMatch =
@@ -460,7 +510,7 @@ export default function KamarPageClient({
       const map: Record<string, string> = {};
       const lokasiList = (lokasiMasterData as Array<Record<string, unknown>>)
         .map((row) => {
-          const id = String(row.id ?? "");
+          const id = parseMasterId(row.id);
           const nama = String(row.nama_lokasi ?? row.nama ?? "").trim();
           if (id && nama) map[id] = nama;
           return nama;
@@ -471,7 +521,7 @@ export default function KamarPageClient({
     }
     if (!blokMasterErr && blokMasterData) {
       const blokList = (blokMasterData as Array<Record<string, unknown>>).map((row) => ({
-        lokasiId: String(row.lokasi_id ?? ""),
+        lokasiId: parseMasterId(row.lokasi_id),
         namaBlok: String(row.nama_blok ?? row.nama ?? "").trim(),
       }));
       setMasterBlokCloud(blokList);
@@ -521,51 +571,45 @@ export default function KamarPageClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localDemoMode, masterTick, sessionHydrated, cloudSyncTick]);
 
-  const resetForm = () => {
-    if (localDemoMode) {
-      const loc =
-        buildLokasiSelectOptions(true, data, penghuniSandboxRows, sandboxReady, masterLokasiCloud)[0] ?? "";
-      const unit =
-        buildUnitSelectOptions(
-          true,
-          loc,
-          data,
-          penghuniSandboxRows,
-          sandboxReady,
-          getCloudUnitOptionsByLokasi(loc)
-        )[0] ?? "";
-      setForm({
-        lokasiKos: loc,
-        unitBlok: unit,
-        noKamar: "",
-        status: "Available",
-        keterangan: "",
-      });
-    } else {
-      const loc =
-        buildLokasiSelectOptions(false, data, penghuniSandboxRows, sandboxReady, masterLokasiCloud)[0] ?? "";
-      const unit =
-        buildUnitSelectOptions(
-          false,
-          loc,
-          data,
-          penghuniSandboxRows,
-          sandboxReady,
-          getCloudUnitOptionsByLokasi(loc)
-        )[0] ?? "";
-      setForm({
-        lokasiKos: loc,
-        unitBlok: unit,
-        noKamar: "",
-        status: "Available",
-        keterangan: "",
-      });
-    }
+  const resetForm = (preferred?: { lokasiKos?: string; unitBlok?: string }) => {
+    const locOpts = buildLokasiSelectOptions(
+      !!localDemoMode,
+      data,
+      penghuniSandboxRows,
+      sandboxReady,
+      masterLokasiCloud
+    );
+    const loc =
+      preferred?.lokasiKos && locOpts.includes(preferred.lokasiKos)
+        ? preferred.lokasiKos
+        : (locOpts[0] ?? "");
+    const units = buildUnitSelectOptions(
+      !!localDemoMode,
+      loc,
+      data,
+      penghuniSandboxRows,
+      sandboxReady,
+      getCloudUnitOptionsByLokasi(loc)
+    );
+    const unit =
+      preferred?.unitBlok && units.includes(preferred.unitBlok)
+        ? preferred.unitBlok
+        : (units[0] ?? "");
+    setForm({
+      lokasiKos: loc,
+      unitBlok: unit,
+      noKamar: "",
+      status: "Available",
+      keterangan: "",
+    });
     setEditingId(null);
   };
 
   const openTambahKamarPanel = () => {
-    resetForm();
+    resetForm({
+      lokasiKos: selectedLokasiFilter !== "Semua Lokasi" ? selectedLokasiFilter : undefined,
+      unitBlok: selectedUnitFilter !== "Semua Blok/Unit" ? selectedUnitFilter : undefined,
+    });
     setInfoMessage("");
     setErrorMessage("");
     setShowKamarSidePanel(true);
@@ -1082,7 +1126,7 @@ export default function KamarPageClient({
                       className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-4 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
                     >
                       {unitSelectOptions.length === 0 ? (
-                        <option value="">Belum ada unit/blok</option>
+                        <option value="">Belum ada unit/blok di Master untuk lokasi ini</option>
                       ) : null}
                       {unitSelectOptions.map((option) => (
                         <option key={option} value={option}>
@@ -1090,6 +1134,9 @@ export default function KamarPageClient({
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-[10px] text-[#8b6d48] dark:text-[#b79a78]">
+                      Opsi mengikuti Master Blok/Unit lokasi ini, termasuk blok yang belum punya kamar.
+                    </p>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium uppercase tracking-[0.18em] text-[#8b6d48]">

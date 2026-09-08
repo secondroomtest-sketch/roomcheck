@@ -26,6 +26,7 @@ import { normalizeUserProfileRole } from "@/lib/user-profile-role";
 import { loginDisplayPrimary } from "@/lib/internal-auth-email";
 import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
+import { emitCloudDataResync } from "@/lib/cloud-resync";
 import type { PengeluaranScope } from "@/lib/pengeluaran-scope";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 import { FINANCE_POS_SEWA_KAMAR } from "@/lib/penghuni-finance-payment-sync";
@@ -655,6 +656,7 @@ export default function MasterPageClient({
     setSuccessMessage("Master lokasi berhasil disimpan.");
     toast("Master lokasi berhasil disimpan.", "success");
     await refreshAll();
+    emitCloudDataResync();
   };
 
   const submitBlok = async (event: FormEvent<HTMLFormElement>) => {
@@ -701,6 +703,7 @@ export default function MasterPageClient({
     setSuccessMessage("Master blok/unit berhasil disimpan.");
     toast("Master blok/unit berhasil disimpan.", "success");
     await refreshAll();
+    emitCloudDataResync();
   };
 
   const deleteRow = async (
@@ -749,6 +752,9 @@ export default function MasterPageClient({
       return false;
     }
     await refreshAll();
+    if (table === "master_lokasi" || table === "master_blok") {
+      emitCloudDataResync();
+    }
     return true;
   };
 

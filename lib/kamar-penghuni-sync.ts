@@ -52,7 +52,7 @@ export function penghuniCountsAsOccupyingKamar(p: PenghuniForKamarSync): boolean
   const unit = (p.unitBlok ?? "").trim();
   const nk = (p.noKamar ?? "").trim();
   if (!lok || !unit || isPlaceholderNoKamar(nk)) return false;
-  /** Stay + sewa lunas + check-out lewat → kamar dianggap kosong lagi. */
+  /** Stay + sewa lunas + check-out lewat → kamar Available (inventaris). Penghuni tetap Stay sampai Check out resmi. */
   if (p.status === "Stay" && p.sewaKamarPaid && isCheckoutDateBeforeToday(p.tglCheckOut)) {
     return false;
   }

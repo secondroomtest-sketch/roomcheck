@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/libsupabaseClient";
 import {
   AlertTriangle,
@@ -59,6 +59,7 @@ import {
 } from "@/lib/kamar-penghuni-sync";
 import { BOOKING_UPLOADS_BUCKET } from "@/lib/bookingkos";
 import { normalizeUserProfileRole } from "@/lib/user-profile-role";
+import { mapPenghuniDbRowToUi } from "@/lib/penghuni-map-db";
 import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
 import {
@@ -92,13 +93,6 @@ const PENGHUNI_STATUS_FILTER_OPTIONS: Array<{
   { value: "Stay", label: "Stay", icon: BedDouble },
   { value: "History", label: "Penghuni Check Out", icon: History },
 ];
-
-function mapPenghuniStatusFromDb(raw: unknown): PenghuniStatus {
-  const s = String(raw ?? "Booking").trim().toLowerCase();
-  if (s === "stay") return "Stay";
-  if (s === "history") return "History";
-  return "Booking";
-}
 
 function splitPenghuniByStatus(rows: PenghuniRow[]): { active: PenghuniRow[]; history: PenghuniRow[] } {
   const active: PenghuniRow[] = [];
@@ -423,10 +417,16 @@ export default function PenghuniPageClient({
     x: number;
     y: number;
   } | null>(null);
-  const canManageSurvey = viewerRole === "super_admin" || viewerRole === "manager";
-  const canEditPenghuni = viewerRole === "super_admin" || viewerRole === "supervisor";
-  const canDeletePenghuni = viewerRole === "super_admin";
-  const canCancelCheckout = viewerRole === "super_admin";
+  const normalizedViewerRole = normalizeUserProfileRole(viewerRole);
+  const canManageSurvey = normalizedViewerRole === "super_admin" || normalizedViewerRole === "manager";
+  const canEditPenghuni = normalizedViewerRole === "super_admin";
+  const canDeletePenghuni = normalizedViewerRole === "super_admin";
+  const canCancelCheckout = normalizedViewerRole === "super_admin";
+
+  const findPenghuniRowById = useCallback(
+    (id: string) => data.find((r) => r.id === id) ?? historyData.find((r) => r.id === id),
+    [data, historyData]
+  );
 
   const kamarSandboxRows = useMemo(() => {
     if (!localDemoMode || !sandboxReady) return [] as KamarRow[];
@@ -926,8 +926,8 @@ export default function PenghuniPageClient({
       .filter((nk) => Boolean(nk) && !isPlaceholderNoKamar(nk));
 
     const merged = new Set(nums);
-    if (editingId && (form.status === "Booking" || form.status === "Stay")) {
-      const ed = data.find((p) => p.id === editingId);
+    if (editingId && (form.status === "Booking" || form.status === "Stay" || form.status === "History")) {
+      const ed = findPenghuniRowById(editingId);
       const cur = ed?.noKamar;
       if (
         cur &&
@@ -948,10 +948,13 @@ export default function PenghuniPageClient({
     form.status,
     editingId,
     data,
+    historyData,
+    findPenghuniRowById,
     sandboxRev,
   ]);
 
   useEffect(() => {
+    if (form.status === "History") return;
     if (availableRoomNumbers.length === 0) {
       if (form.noKamar !== "" && !isPlaceholderNoKamar(form.noKamar)) {
         setForm((prev) => ({ ...prev, noKamar: "" }));
@@ -1024,40 +1027,7 @@ export default function PenghuniPageClient({
     writeSandboxJson(SB_KEY.penghuni, [...active, ...history]);
   };
 
-  const mapDbRowToUi = (row: Record<string, unknown>): PenghuniRow => {
-    const status = mapPenghuniStatusFromDb(row.status);
-
-    const mapped: PenghuniRow = {
-      id: String(row.id ?? ""),
-      namaLengkap: String(row.nama_lengkap ?? ""),
-      lokasiKos: String(row.lokasi_kos ?? ""),
-      unitBlok: String(row.unit_blok ?? ""),
-      noKamar: String(row.no_kamar ?? ""),
-      periodeSewa: String(row.periode_sewa_bulan ?? ""),
-      tglCheckIn: String(row.tgl_check_in ?? ""),
-      tglCheckOut: String(row.tgl_check_out ?? ""),
-      sewaCycleStart: String(row.sewa_cycle_start ?? ""),
-      sewaCycleEnd: String(row.sewa_cycle_end ?? ""),
-      hargaBulanan: String(row.harga_bulanan ?? ""),
-      bookingFee: String(row.booking_fee ?? ""),
-      depositKamar: String(row.deposit_kamar ?? ""),
-      noWa: String(row.no_wa ?? ""),
-      email: String(row.email ?? ""),
-      status,
-      keterangan: String(row.keterangan ?? ""),
-      sewaKamarPaid: Boolean(row.sewa_kamar_paid),
-      sewaKamarNota: String(row.sewa_kamar_nota ?? ""),
-      bookingFeePaid: Boolean(row.booking_fee_paid),
-      bookingFeeNota: String(row.booking_fee_nota ?? ""),
-      depositKamarPaid: Boolean(row.deposit_kamar_paid),
-      depositKamarNota: String(row.deposit_kamar_nota ?? ""),
-      fotoIdentitasPath: String(row.foto_identitas_path ?? ""),
-      buktiTransferPath: String(row.bukti_transfer_path ?? ""),
-      bookingSource: String(row.booking_source ?? ""),
-      createdAt: row.created_at ? String(row.created_at) : null,
-    };
-    return sanitizePenghuniPaymentFlags(mapped);
-  };
+  const mapDbRowToUi = (row: Record<string, unknown>): PenghuniRow => mapPenghuniDbRowToUi(row);
 
   const loadPenghuni = async (): Promise<boolean> => {
     setIsLoading(true);
@@ -1383,7 +1353,13 @@ export default function PenghuniPageClient({
     setInfoMessage("");
     setErrorMessage("");
 
-    if (!form.noKamar) {
+    if (editingId && !canEditPenghuni) {
+      toast("Hanya super admin yang dapat mengedit data penghuni.", "error");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!form.noKamar || isPlaceholderNoKamar(form.noKamar)) {
       const msg =
         "Tidak ada kamar available. Tambahkan kamar available di halaman Kamar.";
       setErrorMessage(msg);
@@ -1392,7 +1368,7 @@ export default function PenghuniPageClient({
       return;
     }
 
-    const existingPenghuniRow = editingId ? data.find((r) => r.id === editingId) : null;
+    const existingPenghuniRow = editingId ? findPenghuniRowById(editingId) : null;
 
     const payload = {
       nama_lengkap: form.namaLengkap,
@@ -1402,8 +1378,18 @@ export default function PenghuniPageClient({
       periode_sewa_bulan: Number(form.periodeSewa),
       tgl_check_in: form.tglCheckIn,
       tgl_check_out: form.status === "Booking" ? null : form.tglCheckOut || null,
-      sewa_cycle_start: form.status === "Stay" ? form.tglCheckIn || null : null,
-      sewa_cycle_end: form.status === "Stay" ? form.tglCheckOut || null : null,
+      sewa_cycle_start:
+        form.status === "Stay"
+          ? form.tglCheckIn || null
+          : form.status === "History"
+            ? existingPenghuniRow?.sewaCycleStart || null
+            : null,
+      sewa_cycle_end:
+        form.status === "Stay"
+          ? form.tglCheckOut || null
+          : form.status === "History"
+            ? existingPenghuniRow?.sewaCycleEnd || form.tglCheckOut || null
+            : null,
       harga_bulanan: parseRupiahToNumber(form.hargaBulanan),
       booking_fee: parseRupiahToNumber(form.bookingFee),
       deposit_kamar: parseRupiahToNumber(form.depositKamar),
@@ -1428,8 +1414,18 @@ export default function PenghuniPageClient({
         periodeSewa: form.periodeSewa,
         tglCheckIn: form.tglCheckIn,
         tglCheckOut: form.status === "Booking" ? "" : form.tglCheckOut,
-        sewaCycleStart: form.status === "Stay" ? form.tglCheckIn : "",
-        sewaCycleEnd: form.status === "Stay" ? form.tglCheckOut : "",
+        sewaCycleStart:
+          form.status === "Stay"
+            ? form.tglCheckIn
+            : form.status === "History"
+              ? existingPenghuniRow?.sewaCycleStart ?? ""
+              : "",
+        sewaCycleEnd:
+          form.status === "Stay"
+            ? form.tglCheckOut
+            : form.status === "History"
+              ? existingPenghuniRow?.sewaCycleEnd ?? ""
+              : "",
         hargaBulanan: String(parseRupiahToNumber(form.hargaBulanan)),
         bookingFee: String(parseRupiahToNumber(form.bookingFee)),
         depositKamar: String(parseRupiahToNumber(form.depositKamar)),
@@ -1444,13 +1440,34 @@ export default function PenghuniPageClient({
         depositKamarNota: existingPenghuniRow?.depositKamarNota ?? "",
         createdAt: new Date().toISOString(),
       };
-      const next = editingId
-        ? data.map((row) => (row.id === editingId ? { ...base, id: editingId } : row))
-        : [base, ...data];
-      setData(next);
-      persistPenghuniSandbox(next, historyData);
-      const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
-      writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, next));
+      if (editingId && form.status === "History") {
+        const nextHistory = historyData.map((row) =>
+          row.id === editingId
+            ? {
+                ...row,
+                ...base,
+                id: editingId,
+                email: row.email,
+                fotoIdentitasPath: row.fotoIdentitasPath,
+                buktiTransferPath: row.buktiTransferPath,
+                bookingSource: row.bookingSource,
+                sewaCycleStart: base.sewaCycleStart || row.sewaCycleStart,
+                sewaCycleEnd: base.sewaCycleEnd || row.sewaCycleEnd,
+                createdAt: row.createdAt ?? base.createdAt,
+              }
+            : row
+        );
+        setHistoryData(nextHistory);
+        persistPenghuniSandbox(data, nextHistory);
+      } else {
+        const next = editingId
+          ? data.map((row) => (row.id === editingId ? { ...base, id: editingId } : row))
+          : [base, ...data];
+        setData(next);
+        persistPenghuniSandbox(next, historyData);
+        const kamarSnapshot = readSandboxJson<KamarRow[]>(SB_KEY.kamar, []);
+        writeSandboxJson(SB_KEY.kamar, syncKamarRowsWithPenghuniList(kamarSnapshot, next));
+      }
       toast(editingId ? "Data penghuni berhasil diperbarui." : "Data penghuni berhasil disimpan.", "success");
       resetForm();
       setShowPenghuniForm(false);
@@ -1488,12 +1505,18 @@ export default function PenghuniPageClient({
     }
 
     await loadPenghuni();
-    await reconcileCloudKamarWithPenghuni();
+    if (!(editingId && form.status === "History")) {
+      await reconcileCloudKamarWithPenghuni();
+    }
     resetForm();
     setIsSubmitting(false);
   };
 
   const handleEdit = (row: PenghuniRow) => {
+    if (!canEditPenghuni) {
+      toast("Hanya super admin yang dapat mengedit data penghuni.", "error");
+      return;
+    }
     setShowSurveyForm(false);
     setPenghuniProfileRow(null);
     setShowSewaPaymentPanel(false);
@@ -1510,9 +1533,12 @@ export default function PenghuniPageClient({
           : getCloudUnitOptionsByLokasi(loc);
         return row.unitBlok && units.includes(row.unitBlok) ? row.unitBlok : units[0] ?? "";
       })(),
-      noKamar: !isPlaceholderNoKamar(row.noKamar)
-        ? row.noKamar
-        : availableRoomNumbers[0] || "",
+      noKamar:
+        row.status === "History"
+          ? row.noKamar || ""
+          : !isPlaceholderNoKamar(row.noKamar)
+            ? row.noKamar
+            : availableRoomNumbers[0] || "",
       periodeSewa: row.periodeSewa || "1",
       tglCheckIn: row.tglCheckIn || "",
       tglCheckOut: row.tglCheckOut || "",
@@ -2644,8 +2670,8 @@ export default function PenghuniPageClient({
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden />
                   <p>
                     <span className="font-semibold">Pembayaran belum lengkap:</span> ada{" "}
-                    <span className="font-bold">{unpaidPenghuniPaymentCount}</span> penghuni dengan sewa dan/atau deposit
-                    yang belum ditandai lunas lewat tombol payment di profil.
+                    <span className="font-bold">{unpaidPenghuniPaymentCount}</span> penghuni dengan sewa, deposit,
+                    dan/atau booking fee yang belum ditandai lunas lewat tombol payment di profil.
                   </p>
                 </div>
               ) : null}
@@ -2658,7 +2684,9 @@ export default function PenghuniPageClient({
                   <p>
                     <span className="font-semibold">Telat bayar sewa:</span> ada{" "}
                     <span className="font-bold">{overduePenghuniCount}</span> penghuni melewati tanggal check-out.
-                    Gunakan tombol <span className="font-semibold">Extend stay</span> di profil untuk perpanjangan.
+                    Gunakan <span className="font-semibold">Extend stay</span> di profil untuk perpanjangan, atau{" "}
+                    <span className="font-semibold">Check out</span> jika sudah keluar (kamar lunas yang lewat
+                    check-out sudah dianggap kosong di halaman Kamar).
                   </p>
                 </div>
               ) : null}
@@ -2968,7 +2996,18 @@ export default function PenghuniPageClient({
                       <td className="px-3 py-2">{row.tglCheckOut || "—"}</td>
                       <td className="px-3 py-2 align-middle">
                         {isHistoryRow ? (
-                          <span className="text-[10px] text-[#8b6d48] dark:text-[#b79a78]">Double klik profil</span>
+                          <div className="relative z-0 flex flex-wrap items-center gap-1">
+                            {canEditPenghuni ? (
+                              <ActionButtonWithIcon
+                                icon={Pencil}
+                                onClick={() => handleEdit(row)}
+                                label="Edit"
+                                className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white"
+                              />
+                            ) : (
+                              <span className="text-[10px] text-[#8b6d48] dark:text-[#b79a78]">Double klik profil</span>
+                            )}
+                          </div>
                         ) : (
                           <div className="relative z-0 flex flex-wrap gap-1">
                             {canEditPenghuni ? (
@@ -3356,8 +3395,19 @@ export default function PenghuniPageClient({
                     </button>
                   </div>
                 ) : null}
-                {penghuniProfileRow.status === "History" && canCancelCheckout ? (
+                {penghuniProfileRow.status === "History" && (canCancelCheckout || canEditPenghuni) ? (
                   <div className="mt-2 flex flex-wrap gap-2">
+                    {canEditPenghuni ? (
+                      <button
+                        type="button"
+                        onClick={() => handleEdit(penghuniProfileRow)}
+                        className="btn-tactile inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-blue-100 px-2.5 py-1.5 text-[11px] font-semibold text-blue-900 transition hover:bg-blue-200 dark:border-blue-700 dark:bg-blue-900/40 dark:text-blue-100 dark:hover:bg-blue-900/60"
+                      >
+                        <Pencil size={13} aria-hidden />
+                        Edit arsip
+                      </button>
+                    ) : null}
+                    {canCancelCheckout ? (
                     <button
                       type="button"
                       onClick={() => void handleCancelCheckoutPenghuni()}
@@ -3366,6 +3416,7 @@ export default function PenghuniPageClient({
                       <Undo2 size={13} aria-hidden />
                       Batalkan check out
                     </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -3531,6 +3582,16 @@ export default function PenghuniPageClient({
                   <p className="rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-200">
                     Penghuni ini sudah check out dan hanya tampil di daftar Penghuni Check Out.
                   </p>
+                  {canEditPenghuni ? (
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(penghuniProfileRow)}
+                      className="btn-tactile flex w-full items-center justify-center gap-2 rounded-2xl border border-blue-300 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900 shadow-sm transition hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-900/50"
+                    >
+                      <Pencil size={18} aria-hidden />
+                      Edit arsip
+                    </button>
+                  ) : null}
                   {canCancelCheckout ? (
                     <button
                       type="button"
@@ -4119,18 +4180,22 @@ export default function PenghuniPageClient({
                 <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setStatusMenuOpen((prev) => !prev)}
+                    onClick={() => {
+                      if (form.status === "History") return;
+                      setStatusMenuOpen((prev) => !prev);
+                    }}
+                    disabled={form.status === "History"}
                     className={`flex w-full items-center justify-between rounded-2xl border px-4 py-2.5 text-sm outline-none focus:ring-2 dark:bg-[#2b2016] ${
                       isBlueAccent
                         ? "border-blue-400 bg-blue-50 text-blue-700 ring-blue-300 dark:border-blue-500 dark:bg-[#1a2740] dark:text-blue-200"
                         : "border-[#dcc7aa] bg-[#fffdf9] text-[#3f2f1f] ring-[#c09c70] dark:border-[#4d3925]"
-                    }`}
+                    } ${form.status === "History" ? "cursor-not-allowed opacity-80" : ""}`}
                   >
                     <StatusBadge status={form.status} />
-                    <ChevronDown size={16} />
+                    {form.status === "History" ? null : <ChevronDown size={16} />}
                   </button>
 
-                  {statusMenuOpen ? (
+                  {statusMenuOpen && form.status !== "History" ? (
                     <div className="absolute z-[120] mt-2 w-full rounded-2xl border border-[#dcc7aa] bg-white p-2 shadow-lg dark:border-[#4d3925] dark:bg-[#2b2016]">
                       {(["Booking", "Stay"] as PenghuniStatus[]).map((statusOption) => (
                         <button
@@ -4171,7 +4236,7 @@ export default function PenghuniPageClient({
                   value={form.noKamar}
                   onChange={(event) => handleInputChange("noKamar", event.target.value)}
                   className="w-full rounded-2xl border border-[#dcc7aa] bg-[#fffdf9] px-4 py-2.5 text-sm outline-none ring-[#c09c70] focus:ring-2 dark:border-[#4d3925] dark:bg-[#2b2016]"
-                  disabled={availableRoomNumbers.length === 0}
+                  disabled={availableRoomNumbers.length === 0 && form.status !== "History"}
                 >
                   {availableRoomNumbers.length > 0 ? (
                     availableRoomNumbers.map((option) => (
