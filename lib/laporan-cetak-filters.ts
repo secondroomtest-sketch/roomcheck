@@ -9,6 +9,7 @@ export type LaporanFokusCetak = "kos" | "manajemen";
 
 const KOLOM_KARTU_EKSKLUSIF_MANAJEMEN = new Set([
   "Pemasukan manajemen",
+  "Deposit kamar",
   "Pengeluaran manajemen",
   "P&L Manajemen",
 ]);

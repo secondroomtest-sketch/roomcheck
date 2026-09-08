@@ -76,13 +76,15 @@ export type LaporanExportPayloadV1 = {
     pemasukanTotal: number;
     /** Total nominal pemasukan kos (sewa kamar + booking fee). */
     pemasukanKosTotal: number;
-    /** Total nominal pemasukan manajemen (selain sewa + booking fee). */
+    /** Total nominal pemasukan manajemen (margin operasional, tanpa deposit kamar). */
     pemasukanManajemenTotal: number;
+    /** Deposit kamar — tidak dipotong P&L manajemen. */
+    depositKamarPemasukanTotal?: number;
     pengeluaranKosTotal: number;
     pengeluaranManajemenTotal: number;
     /** P&L kos: pemasukan kos − pengeluaran kos. */
     plKosNominal: number;
-    /** P&L manajemen: pemasukan manajemen − pengeluaran manajemen. */
+    /** P&L manajemen: margin tanpa deposit − pengeluaran manajemen. */
     plManajemenNominal: number;
     /** Total pemasukan tampilan owner (deposit/booking tidak dijumlahkan). */
     revenueOwnerView: number;

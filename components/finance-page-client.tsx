@@ -1056,11 +1056,19 @@ export default function FinancePageClient({
     () => sumNominalRows(riwayatPengeluaranManajemenRows),
     [riwayatPengeluaranManajemenRows]
   );
+  const sumDepositKamarNominal = useMemo(
+    () =>
+      sumNominalRows(
+        filteredFinanceData.filter((r) => r.kategori === "Pemasukan" && isDepositFinancePos(r.pos))
+      ),
+    [filteredFinanceData]
+  );
+  const sumMarginManajemenOperasionalNominal = sumNonSewaPemasukanNominal - sumDepositKamarNominal;
   const plKosSewaMinusPengeluaranKos =
     financeRiwayatKategori === "Semua" ? sumSewaKamarNominal - sumPengeluaranKosNominal : null;
   const plManajemenMarginMinusPengeluaran =
     financeRiwayatKategori === "Semua"
-      ? sumNonSewaPemasukanNominal - sumPengeluaranManajemenNominal
+      ? sumMarginManajemenOperasionalNominal - sumPengeluaranManajemenNominal
       : null;
 
   const formLokasiOptions = useMemo(() => {
@@ -2111,8 +2119,9 @@ export default function FinancePageClient({
               className="mt-1.5 text-lg text-[#2d2217] sm:text-xl dark:text-[#f6e9d5]"
             />
             <p className="mt-2 text-[12px] leading-relaxed text-[#7f6344] dark:text-[#b79a78]">
-              Pemetaan dua P&amp;L mengikuti Master: kos (sewa kamar − pengeluaran kos) dan manajemen (margin −
-              pengeluaran manajemen). Ringkasan di bagian bawah muncul jika kategori &quot;Semua&quot;.
+              Pemetaan dua P&amp;L mengikuti Master: kos (sewa kamar − pengeluaran kos) dan manajemen (margin
+              tanpa deposit kamar − pengeluaran manajemen). Deposit kamar tetap utuh. Ringkasan di bagian
+              bawah muncul jika kategori &quot;Semua&quot;.
             </p>
           </div>
           <div className="flex w-full min-w-0 shrink-0 flex-col gap-2 sm:w-auto md:max-w-none md:flex-row md:flex-wrap md:justify-end">
@@ -2343,7 +2352,7 @@ export default function FinancePageClient({
 
           <FinanceRiwayatTableBlock
             title="Riwayat — Pemasukan di luar sewa kamar"
-            hint="Dasar P&amp;L manajemen: pemasukan selain sewa kamar. Dikurangi pengeluaran manajemen (tabel terpisah)."
+            hint="Dasar P&amp;L manajemen: pemasukan selain sewa kamar. Deposit kamar tetap tercatat di sini, tetapi tidak dipotong pengeluaran (lihat ringkasan P&amp;L)."
             rows={riwayatNonSewaKamarPemasukanRows}
             isLoading={isLoading}
             footerSumLabel="Total margin manajemen (SUM nominal)"
@@ -2376,7 +2385,7 @@ export default function FinancePageClient({
 
           <FinanceRiwayatTableBlock
             title="Riwayat — Pengeluaran manajemen"
-            hint="POS pengeluaran dengan lingkup &quot;manajemen&quot; di Master. Membentuk P&amp;L manajemen bersama margin."
+            hint="POS pengeluaran dengan lingkup &quot;manajemen&quot; di Master. Dipotong dari margin tanpa deposit kamar."
             rows={riwayatPengeluaranManajemenRows}
             isLoading={isLoading}
             footerSumLabel="Total pengeluaran manajemen (SUM nominal)"
@@ -2417,7 +2426,7 @@ export default function FinancePageClient({
               <p className="mt-3 text-[#2d2217] dark:text-[#f6e9d5]">
                 <span className="font-medium">P&amp;L manajemen</span>
                 {" "}
-                (margin − pengeluaran manajemen):{" "}
+                (margin tanpa deposit − pengeluaran manajemen):{" "}
                 <span
                   className={`font-semibold tabular-nums ${
                     plManajemenMarginMinusPengeluaran < 0
@@ -2429,8 +2438,11 @@ export default function FinancePageClient({
                 </span>
               </p>
               <p className="mt-1 text-xs text-[#6b5238] dark:text-[#b79a78]">
-                {formatNominalDisplay(String(sumNonSewaPemasukanNominal))} −{" "}
+                {formatNominalDisplay(String(sumMarginManajemenOperasionalNominal))} −{" "}
                 {formatNominalDisplay(String(sumPengeluaranManajemenNominal))}
+              </p>
+              <p className="mt-1 text-xs text-[#6b5238] dark:text-[#b79a78]">
+                Deposit kamar (tidak dipotong): {formatNominalDisplay(String(sumDepositKamarNominal))}
               </p>
               <p className="mt-2 border-t border-[#dcc7aa] pt-2 text-[11px] leading-snug text-[#7f6344] dark:text-[#b79a78]">
                 Transaksi lama tanpa kolom lingkup di database diperlakukan sebagai pengeluaran kos setelah migrasi

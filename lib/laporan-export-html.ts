@@ -197,8 +197,8 @@ export function buildLaporanStandaloneHtml(
     fokus === "kos"
       ? `<strong>P&amp;L kos:</strong> ${esc(formatRp(summary.plKosNominal))} (masuk kos ${esc(formatRp(summary.pemasukanKosTotal))} − keluar kos ${esc(formatRp(summary.pengeluaranKosTotal))}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))} · <strong>Owner view:</strong> ${esc(formatRp(summary.revenueOwnerView ?? summary.pemasukanTotal))}`
       : fokus === "manajemen"
-        ? `<strong>P&amp;L manajemen:</strong> ${esc(formatRp(summary.plManajemenNominal))} (margin ${esc(formatRp(summary.pemasukanManajemenTotal))} − keluar manajemen ${esc(formatRp(summary.pengeluaranManajemenTotal))}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))}`
-        : `<strong>P&amp;L kos:</strong> ${esc(formatRp(summary.plKosNominal))} (masuk kos ${esc(formatRp(summary.pemasukanKosTotal))} − keluar kos ${esc(formatRp(summary.pengeluaranKosTotal))}) · <strong>P&amp;L manajemen:</strong> ${esc(formatRp(summary.plManajemenNominal))} (margin ${esc(formatRp(summary.pemasukanManajemenTotal))} − keluar manajemen ${esc(formatRp(summary.pengeluaranManajemenTotal))}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))} · <strong>Owner view:</strong> ${esc(formatRp(summary.revenueOwnerView ?? summary.pemasukanTotal))}`;
+        ? `<strong>P&amp;L manajemen:</strong> ${esc(formatRp(summary.plManajemenNominal))} (margin tanpa deposit ${esc(formatRp(summary.pemasukanManajemenTotal))} − keluar manajemen ${esc(formatRp(summary.pengeluaranManajemenTotal))}${summary.depositKamarPemasukanTotal ? ` · deposit utuh ${esc(formatRp(summary.depositKamarPemasukanTotal))}` : ""}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))}`
+        : `<strong>P&amp;L kos:</strong> ${esc(formatRp(summary.plKosNominal))} (masuk kos ${esc(formatRp(summary.pemasukanKosTotal))} − keluar kos ${esc(formatRp(summary.pengeluaranKosTotal))}) · <strong>P&amp;L manajemen:</strong> ${esc(formatRp(summary.plManajemenNominal))} (margin tanpa deposit ${esc(formatRp(summary.pemasukanManajemenTotal))} − keluar manajemen ${esc(formatRp(summary.pengeluaranManajemenTotal))}${summary.depositKamarPemasukanTotal ? ` · deposit utuh ${esc(formatRp(summary.depositKamarPemasukanTotal))}` : ""}) · <strong>Total pemasukan:</strong> ${esc(formatRp(summary.pemasukanTotal))} · <strong>Owner view:</strong> ${esc(formatRp(summary.revenueOwnerView ?? summary.pemasukanTotal))}`;
 
   const fokusMetaPlain = fokus === "kos" ? "Laporan Kos" : fokus === "manajemen" ? "Laporan Manajemen" : "Laporan lengkap";
 
@@ -318,7 +318,8 @@ export function buildEmailBodySummary(payload: LaporanExportPayloadV1): string {
     `Pengeluaran kos: ${formatRp(s.pengeluaranKosTotal)}`,
     `Pengeluaran manajemen: ${formatRp(s.pengeluaranManajemenTotal)}`,
     `P&L kos: ${formatRp(s.plKosNominal)}`,
-    `Pemasukan manajemen: ${formatRp(s.pemasukanManajemenTotal)}`,
+    `Pemasukan manajemen (tanpa deposit): ${formatRp(s.pemasukanManajemenTotal)}`,
+    `Deposit kamar (tidak dipotong): ${formatRp(s.depositKamarPemasukanTotal ?? 0)}`,
     `P&L manajemen: ${formatRp(s.plManajemenNominal)}`,
     `Total pemasukan: ${formatRp(s.pemasukanTotal)}`,
     `Revenue owner (tanpa deposit/booking): ${formatRp(s.revenueOwnerView ?? s.pemasukanTotal)}`,

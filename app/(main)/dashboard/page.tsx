@@ -1653,8 +1653,11 @@ export default function DashboardPage() {
                   {Math.abs(dashboardPlBreakdown.plManajemenNominal).toLocaleString("id-ID")}
                 </p>
                 <p className="mt-1 text-[9px] leading-snug text-[#4d6d66] dark:text-[#9ec4bc] sm:text-[10px]">
-                  Masuk manajemen Rp {dashboardPlBreakdown.pemasukanManajemenTotal.toLocaleString("id-ID")} − keluar
-                  manajemen Rp {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
+                  Margin tanpa deposit Rp {dashboardPlBreakdown.pemasukanManajemenTotal.toLocaleString("id-ID")} −
+                  keluar manajemen Rp {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
+                  {dashboardPlBreakdown.depositKamarPemasukanTotal > 0
+                    ? ` · deposit utuh Rp ${dashboardPlBreakdown.depositKamarPemasukanTotal.toLocaleString("id-ID")}`
+                    : ""}
                 </p>
               </div>
             ) : null}

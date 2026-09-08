@@ -53,6 +53,7 @@ import {
   unitNamesForOwnerCloud,
 } from "@/lib/laporan-fetch-mappers";
 import {
+  isDepositKamarPemasukanReportRow,
   isForcedPemasukanManajemenFinancePos,
   isPemasukanKosReportRow,
 } from "@/lib/laporan-finance-breakdown";
@@ -632,15 +633,27 @@ export default function LaporanPageClient({
       }
     }
     const rows = Array.from(map.values()).sort((a, b) => a.keterangan.localeCompare(b.keterangan, "id"));
+    let depositHold = 0;
+    for (const row of filteredFinance) {
+      if (isDepositKamarPemasukanReportRow(row)) depositHold += row.nominal;
+    }
     const totalPemasukan = rows.reduce((s, r) => s + r.pemasukan, 0);
     const totalPengeluaran = rows.reduce((s, r) => s + r.pengeluaran, 0);
     rows.push({
-      pemasukan: totalPemasukan,
+      pemasukan: totalPemasukan - depositHold,
       pengeluaran: totalPengeluaran,
-      saldo: totalPemasukan - totalPengeluaran,
-      keterangan: "TOTAL P&L Manajemen",
+      saldo: totalPemasukan - depositHold - totalPengeluaran,
+      keterangan: "TOTAL P&L Manajemen (tanpa deposit)",
       isTotal: true,
     });
+    if (depositHold > 0) {
+      rows.push({
+        pemasukan: depositHold,
+        pengeluaran: 0,
+        saldo: depositHold,
+        keterangan: "Deposit kamar (tidak dipotong P&L)",
+      });
+    }
     return rows;
   }, [filteredFinance]);
 

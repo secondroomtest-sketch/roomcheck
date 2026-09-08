@@ -1,6 +1,7 @@
 import type { ReportFinanceRow } from "@/lib/laporan-export-types";
 import type { LaporanMonthlyFinanceRow } from "@/lib/laporan-finance-breakdown";
 import {
+  isDepositKamarPemasukanReportRow,
   isForcedPemasukanManajemenFinancePos,
   isPemasukanKosReportRow,
 } from "@/lib/laporan-finance-breakdown";
@@ -41,6 +42,8 @@ export function computeMonthlyChartData(filteredFinance: ReportFinanceRow[]): La
       }
     } else if (isPemasukanKosReportRow(row)) {
       existing.pemasukanKos += n;
+    } else if (isDepositKamarPemasukanReportRow(row)) {
+      /** Deposit dicatat terpisah — tidak masuk margin yang dipotong pengeluaran. */
     } else {
       existing.pemasukanManajemen += n;
     }

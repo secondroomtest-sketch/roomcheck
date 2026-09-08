@@ -304,8 +304,11 @@ export default function LaporanCetakClient() {
                   {formatRp(s.plManajemenNominal)}
                 </p>
                 <p className="text-xs text-[#6b5238]">
-                  Pemasukan manajemen {formatRp(s.pemasukanManajemenTotal)} − pengeluaran manajemen{" "}
+                  Margin tanpa deposit {formatRp(s.pemasukanManajemenTotal)} − pengeluaran manajemen{" "}
                   {formatRp(s.pengeluaranManajemenTotal)}
+                  {s.depositKamarPemasukanTotal
+                    ? ` · deposit utuh ${formatRp(s.depositKamarPemasukanTotal)}`
+                    : ""}
                 </p>
               </div>
             ) : null}

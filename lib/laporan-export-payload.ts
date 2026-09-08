@@ -169,8 +169,16 @@ export function buildLaporanExportPayloadV1(params: {
       value: formatRp(finBreak.pemasukanManajemenTotal),
       note:
         finBreak.pemasukanManajemenTransactionCount === 0
-          ? "Dasar P&L manajemen"
-          : `${finBreak.pemasukanManajemenTransactionCount} transaksi`,
+          ? "Margin operasional — tanpa deposit kamar"
+          : `${finBreak.pemasukanManajemenTransactionCount} transaksi (tanpa deposit)`,
+    },
+    {
+      label: "Deposit kamar",
+      value: formatRp(finBreak.depositKamarPemasukanTotal),
+      note:
+        finBreak.depositKamarPemasukanTransactionCount === 0
+          ? "Tidak dipotong pengeluaran manajemen"
+          : `${finBreak.depositKamarPemasukanTransactionCount} transaksi — tetap utuh`,
     },
     {
       label: "Pengeluaran manajemen",
@@ -183,7 +191,7 @@ export function buildLaporanExportPayloadV1(params: {
     {
       label: "P&L Manajemen",
       value: formatRp(finBreak.plManajemenNominal),
-      note: "Pemasukan manajemen − pengeluaran manajemen",
+      note: "Margin tanpa deposit − pengeluaran manajemen",
     },
   ];
 
@@ -204,6 +212,7 @@ export function buildLaporanExportPayloadV1(params: {
       pemasukanTotal: finBreak.pemasukanTotal,
       pemasukanKosTotal: finBreak.pemasukanKosTotal,
       pemasukanManajemenTotal: finBreak.pemasukanManajemenTotal,
+      depositKamarPemasukanTotal: finBreak.depositKamarPemasukanTotal,
       pengeluaranKosTotal: finBreak.pengeluaranKosTotal,
       pengeluaranManajemenTotal: finBreak.pengeluaranManajemenTotal,
       plKosNominal: finBreak.plKosNominal,

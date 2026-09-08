@@ -1,4 +1,4 @@
-import { isSewaKamarFinancePos } from "@/lib/penghuni-finance-payment-sync";
+import { isDepositFinancePos, isSewaKamarFinancePos } from "@/lib/penghuni-finance-payment-sync";
 import { normalizePengeluaranScope, type PengeluaranScope } from "@/lib/pengeluaran-scope";
 import type { ReportFinanceRow } from "@/lib/laporan-export-types";
 
@@ -44,6 +44,13 @@ export function isPemasukanKosReportRow(row: Pick<ReportFinanceRow, "kategori" |
   return isSewaKamarFinancePos(p);
 }
 
+/** Deposit kamar: pemasukan yang tidak boleh dipotong pengeluaran manajemen. */
+export function isDepositKamarPemasukanReportRow(
+  row: Pick<ReportFinanceRow, "kategori" | "pos">
+): boolean {
+  return row.kategori === "Pemasukan" && isDepositFinancePos(String(row.pos ?? ""));
+}
+
 /**
  * POS pengeluaran kos yang juga dihitung sebagai **pemasukan manajemen** (IPL, Manajemen Fee).
  * Tetap masuk `pengeluaranKosTotal` sehingga mengurangi P&amp;L / revenue kos.
@@ -84,17 +91,21 @@ export function isManajemenPlFinanceUiRow(row: {
 
 export type LaporanFinanceBreakdown = {
   pemasukanKosTotal: number;
+  /** Margin manajemen yang boleh dipotong pengeluaran (tanpa deposit kamar). */
   pemasukanManajemenTotal: number;
+  /** Deposit kamar — dicatat utuh, tidak masuk P&L manajemen. */
+  depositKamarPemasukanTotal: number;
   pengeluaranKosTotal: number;
   pengeluaranManajemenTotal: number;
   pengeluaranTotal: number;
   pemasukanTotal: number;
   /** P&amp;L kos: pemasukan sewa kamar − pengeluaran kos. */
   plKosNominal: number;
-  /** P&amp;L manajemen: pemasukan manajemen − pengeluaran manajemen. */
+  /** P&amp;L manajemen: margin tanpa deposit − pengeluaran manajemen. */
   plManajemenNominal: number;
   pemasukanKosTransactionCount: number;
   pemasukanManajemenTransactionCount: number;
+  depositKamarPemasukanTransactionCount: number;
   pengeluaranKosTransactionCount: number;
   pengeluaranManajemenTransactionCount: number;
   pengeluaranTransactionCount: number;
@@ -103,10 +114,12 @@ export type LaporanFinanceBreakdown = {
 export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): LaporanFinanceBreakdown {
   let pemasukanKosTotal = 0;
   let pemasukanManajemenTotal = 0;
+  let depositKamarPemasukanTotal = 0;
   let pengeluaranKosTotal = 0;
   let pengeluaranManajemenTotal = 0;
   let pemasukanKosTransactionCount = 0;
   let pemasukanManajemenTransactionCount = 0;
+  let depositKamarPemasukanTransactionCount = 0;
   let pengeluaranKosTransactionCount = 0;
   let pengeluaranManajemenTransactionCount = 0;
 
@@ -133,17 +146,21 @@ export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): Lapora
     if (isPemasukanKosReportRow(f)) {
       pemasukanKosTotal += n;
       pemasukanKosTransactionCount += 1;
+    } else if (isDepositKamarPemasukanReportRow(f)) {
+      depositKamarPemasukanTotal += n;
+      depositKamarPemasukanTransactionCount += 1;
     } else {
       pemasukanManajemenTotal += n;
       pemasukanManajemenTransactionCount += 1;
     }
   }
 
-  const pemasukanTotal = pemasukanKosTotal + pemasukanManajemenTotal;
+  const pemasukanTotal = pemasukanKosTotal + pemasukanManajemenTotal + depositKamarPemasukanTotal;
   const pengeluaranTotal = pengeluaranKosTotal + pengeluaranManajemenTotal;
   return {
     pemasukanKosTotal,
     pemasukanManajemenTotal,
+    depositKamarPemasukanTotal,
     pengeluaranKosTotal,
     pengeluaranManajemenTotal,
     pengeluaranTotal,
@@ -152,6 +169,7 @@ export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): Lapora
     plManajemenNominal: pemasukanManajemenTotal - pengeluaranManajemenTotal,
     pemasukanKosTransactionCount,
     pemasukanManajemenTransactionCount,
+    depositKamarPemasukanTransactionCount,
     pengeluaranKosTransactionCount,
     pengeluaranManajemenTransactionCount,
     pengeluaranTransactionCount: pengeluaranKosTransactionCount + pengeluaranManajemenTransactionCount,
