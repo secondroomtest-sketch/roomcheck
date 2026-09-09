@@ -1,4 +1,8 @@
-import { isDepositFinancePos, isSewaKamarFinancePos } from "@/lib/penghuni-finance-payment-sync";
+import {
+  isDepositFinancePos,
+  isRefundDepositFinancePos,
+  isSewaKamarFinancePos,
+} from "@/lib/penghuni-finance-payment-sync";
 import { normalizePengeluaranScope, type PengeluaranScope } from "@/lib/pengeluaran-scope";
 import type { ReportFinanceRow } from "@/lib/laporan-export-types";
 
@@ -44,11 +48,18 @@ export function isPemasukanKosReportRow(row: Pick<ReportFinanceRow, "kategori" |
   return isSewaKamarFinancePos(p);
 }
 
-/** Deposit kamar: pemasukan yang tidak boleh dipotong pengeluaran manajemen. */
+/** Deposit kamar: pemasukan yang tidak boleh dipotong pengeluaran manajemen biasa. */
 export function isDepositKamarPemasukanReportRow(
   row: Pick<ReportFinanceRow, "kategori" | "pos">
 ): boolean {
   return row.kategori === "Pemasukan" && isDepositFinancePos(String(row.pos ?? ""));
+}
+
+/** Hanya POS Refund deposit yang mengurangi total deposit kamar (bukan P&L operasional). */
+export function isRefundDepositPengeluaranReportRow(
+  row: Pick<ReportFinanceRow, "kategori" | "pos">
+): boolean {
+  return row.kategori === "Pengeluaran" && isRefundDepositFinancePos(row.pos);
 }
 
 /**
@@ -65,6 +76,7 @@ export function isPengeluaranKosReportRow(
   row: Pick<ReportFinanceRow, "kategori" | "pos" | "pengeluaranScope">
 ): boolean {
   if (row.kategori !== "Pengeluaran") return false;
+  if (isRefundDepositPengeluaranReportRow(row)) return false;
   if (isForcedPemasukanManajemenFinancePos(row.pos)) return true;
   return normalizePengeluaranScope(row.pengeluaranScope) !== "manajemen";
 }
@@ -84,6 +96,7 @@ export function isManajemenPlFinanceUiRow(row: {
 }): boolean {
   if (row.kategori === "Pengeluaran") {
     if (isForcedPemasukanManajemenFinancePos(row.pos)) return false;
+    if (isRefundDepositPengeluaranReportRow(row)) return true;
     return normalizePengeluaranScope(row.pengeluaranScope) === "manajemen";
   }
   return !isPemasukanKosReportRow(row);
@@ -93,8 +106,10 @@ export type LaporanFinanceBreakdown = {
   pemasukanKosTotal: number;
   /** Margin manajemen yang boleh dipotong pengeluaran (tanpa deposit kamar). */
   pemasukanManajemenTotal: number;
-  /** Deposit kamar — dicatat utuh, tidak masuk P&L manajemen. */
+  /** Deposit kamar neto (pemasukan deposit − POS Refund deposit). Tidak masuk P&L operasional. */
   depositKamarPemasukanTotal: number;
+  /** Nominal pengeluaran POS Refund deposit (memotong deposit, bukan margin). */
+  refundDepositPengeluaranTotal: number;
   pengeluaranKosTotal: number;
   pengeluaranManajemenTotal: number;
   pengeluaranTotal: number;
@@ -115,6 +130,7 @@ export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): Lapora
   let pemasukanKosTotal = 0;
   let pemasukanManajemenTotal = 0;
   let depositKamarPemasukanTotal = 0;
+  let refundDepositPengeluaranTotal = 0;
   let pengeluaranKosTotal = 0;
   let pengeluaranManajemenTotal = 0;
   let pemasukanKosTransactionCount = 0;
@@ -126,6 +142,10 @@ export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): Lapora
   for (const f of rows) {
     const n = Number(f.nominal) || 0;
     if (f.kategori === "Pengeluaran") {
+      if (isRefundDepositPengeluaranReportRow(f)) {
+        refundDepositPengeluaranTotal += n;
+        continue;
+      }
       if (isForcedPemasukanManajemenFinancePos(f.pos)) {
         pengeluaranKosTotal += n;
         pengeluaranKosTransactionCount += 1;
@@ -155,12 +175,14 @@ export function computeLaporanFinanceBreakdown(rows: ReportFinanceRow[]): Lapora
     }
   }
 
-  const pemasukanTotal = pemasukanKosTotal + pemasukanManajemenTotal + depositKamarPemasukanTotal;
+  const depositKamarNeto = depositKamarPemasukanTotal - refundDepositPengeluaranTotal;
+  const pemasukanTotal = pemasukanKosTotal + pemasukanManajemenTotal + depositKamarNeto;
   const pengeluaranTotal = pengeluaranKosTotal + pengeluaranManajemenTotal;
   return {
     pemasukanKosTotal,
     pemasukanManajemenTotal,
-    depositKamarPemasukanTotal,
+    depositKamarPemasukanTotal: depositKamarNeto,
+    refundDepositPengeluaranTotal,
     pengeluaranKosTotal,
     pengeluaranManajemenTotal,
     pengeluaranTotal,

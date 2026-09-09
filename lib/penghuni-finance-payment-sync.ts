@@ -8,10 +8,16 @@ export const FINANCE_POS_DEPOSIT_KAMAR = "deposit kamar";
 export const FINANCE_POS_DEPOSIT_KAMAR_LEGACY = "Deposit kamar";
 /** POS booking fee / DP sewa (label Master: "Booking fee"). */
 export const FINANCE_POS_BOOKING_FEE = "Booking fee";
+/** POS pengeluaran yang memotong total deposit kamar (bukan P&L operasional). Label Master harus sama. */
+export const FINANCE_POS_REFUND_DEPOSIT = "Refund deposit";
 
 export function isDepositFinancePos(pos: string): boolean {
   const p = (pos ?? "").trim();
   return p === FINANCE_POS_DEPOSIT_KAMAR || p === FINANCE_POS_DEPOSIT_KAMAR_LEGACY;
+}
+
+export function isRefundDepositFinancePos(pos: string | undefined | null): boolean {
+  return String(pos ?? "").trim().toLowerCase() === FINANCE_POS_REFUND_DEPOSIT.toLowerCase();
 }
 
 export function isSewaKamarFinancePos(pos: string): boolean {

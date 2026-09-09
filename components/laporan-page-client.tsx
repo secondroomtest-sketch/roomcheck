@@ -56,6 +56,7 @@ import {
   isDepositKamarPemasukanReportRow,
   isForcedPemasukanManajemenFinancePos,
   isPemasukanKosReportRow,
+  isRefundDepositPengeluaranReportRow,
 } from "@/lib/laporan-finance-breakdown";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 import type { LaporanFokusCetak } from "@/lib/laporan-cetak-filters";
@@ -625,6 +626,8 @@ export default function LaporanPageClient({
           saldo: pemasukan - prev.pengeluaran,
           keterangan: `Pemasukan · ${key.slice(2)}`,
         });
+      } else if (row.kategori === "Pengeluaran" && isRefundDepositPengeluaranReportRow(row)) {
+        continue;
       } else if (row.kategori === "Pengeluaran" && normalizePengeluaranScope(row.pengeluaranScope) === "manajemen") {
         const key = `k:${(row.pos ?? "").trim() || "Pengeluaran manajemen lain"}`;
         const prev = map.get(key) ?? { pemasukan: 0, pengeluaran: 0, saldo: 0, keterangan: "" };
@@ -634,9 +637,12 @@ export default function LaporanPageClient({
     }
     const rows = Array.from(map.values()).sort((a, b) => a.keterangan.localeCompare(b.keterangan, "id"));
     let depositHold = 0;
+    let refundDeposit = 0;
     for (const row of filteredFinance) {
       if (isDepositKamarPemasukanReportRow(row)) depositHold += row.nominal;
+      if (isRefundDepositPengeluaranReportRow(row)) refundDeposit += row.nominal;
     }
+    const depositNeto = depositHold - refundDeposit;
     const totalPemasukan = rows.reduce((s, r) => s + r.pemasukan, 0);
     const totalPengeluaran = rows.reduce((s, r) => s + r.pengeluaran, 0);
     rows.push({
@@ -646,12 +652,12 @@ export default function LaporanPageClient({
       keterangan: "TOTAL P&L Manajemen (tanpa deposit)",
       isTotal: true,
     });
-    if (depositHold > 0) {
+    if (depositHold > 0 || refundDeposit > 0) {
       rows.push({
         pemasukan: depositHold,
-        pengeluaran: 0,
-        saldo: depositHold,
-        keterangan: "Deposit kamar (tidak dipotong P&L)",
+        pengeluaran: refundDeposit,
+        saldo: depositNeto,
+        keterangan: "Deposit kamar (dipotong POS Refund deposit)",
       });
     }
     return rows;

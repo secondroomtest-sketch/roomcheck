@@ -1655,8 +1655,9 @@ export default function DashboardPage() {
                 <p className="mt-1 text-[9px] leading-snug text-[#4d6d66] dark:text-[#9ec4bc] sm:text-[10px]">
                   Margin tanpa deposit Rp {dashboardPlBreakdown.pemasukanManajemenTotal.toLocaleString("id-ID")} −
                   keluar manajemen Rp {dashboardPlBreakdown.pengeluaranManajemenTotal.toLocaleString("id-ID")}
-                  {dashboardPlBreakdown.depositKamarPemasukanTotal > 0
-                    ? ` · deposit utuh Rp ${dashboardPlBreakdown.depositKamarPemasukanTotal.toLocaleString("id-ID")}`
+                  {dashboardPlBreakdown.depositKamarPemasukanTotal !== 0 ||
+                  dashboardPlBreakdown.refundDepositPengeluaranTotal > 0
+                    ? ` · deposit neto Rp ${dashboardPlBreakdown.depositKamarPemasukanTotal.toLocaleString("id-ID")}`
                     : ""}
                 </p>
               </div>

@@ -306,8 +306,11 @@ export default function LaporanCetakClient() {
                 <p className="text-xs text-[#6b5238]">
                   Margin tanpa deposit {formatRp(s.pemasukanManajemenTotal)} − pengeluaran manajemen{" "}
                   {formatRp(s.pengeluaranManajemenTotal)}
-                  {s.depositKamarPemasukanTotal
-                    ? ` · deposit utuh ${formatRp(s.depositKamarPemasukanTotal)}`
+                  {s.depositKamarPemasukanTotal != null
+                    ? ` · deposit neto ${formatRp(s.depositKamarPemasukanTotal)}`
+                    : ""}
+                  {s.refundDepositPengeluaranTotal
+                    ? ` · refund deposit ${formatRp(s.refundDepositPengeluaranTotal)}`
                     : ""}
                 </p>
               </div>

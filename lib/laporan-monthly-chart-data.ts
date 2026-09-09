@@ -4,6 +4,7 @@ import {
   isDepositKamarPemasukanReportRow,
   isForcedPemasukanManajemenFinancePos,
   isPemasukanKosReportRow,
+  isRefundDepositPengeluaranReportRow,
 } from "@/lib/laporan-finance-breakdown";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 import { monthKeyFromYmd } from "@/lib/laporan-report-dates";
@@ -32,7 +33,9 @@ export function computeMonthlyChartData(filteredFinance: ReportFinanceRow[]): La
       } satisfies LaporanMonthlyFinanceRow);
     const n = row.nominal;
     if (row.kategori === "Pengeluaran") {
-      if (isForcedPemasukanManajemenFinancePos(row.pos)) {
+      if (isRefundDepositPengeluaranReportRow(row)) {
+        /** Memotong deposit kamar, bukan bar pengeluaran manajemen. */
+      } else if (isForcedPemasukanManajemenFinancePos(row.pos)) {
         existing.pengeluaranKos += n;
         existing.pemasukanManajemen += n;
       } else if (normalizePengeluaranScope(row.pengeluaranScope) === "manajemen") {

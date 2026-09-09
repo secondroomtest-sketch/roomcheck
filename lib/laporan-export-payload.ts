@@ -176,9 +176,12 @@ export function buildLaporanExportPayloadV1(params: {
       label: "Deposit kamar",
       value: formatRp(finBreak.depositKamarPemasukanTotal),
       note:
-        finBreak.depositKamarPemasukanTransactionCount === 0
-          ? "Tidak dipotong pengeluaran manajemen"
-          : `${finBreak.depositKamarPemasukanTransactionCount} transaksi — tetap utuh`,
+        finBreak.depositKamarPemasukanTransactionCount === 0 &&
+        finBreak.refundDepositPengeluaranTotal === 0
+          ? "Hanya dipotong POS Refund deposit"
+          : finBreak.refundDepositPengeluaranTotal > 0
+            ? `Neto setelah refund ${formatRp(finBreak.refundDepositPengeluaranTotal)}`
+            : `${finBreak.depositKamarPemasukanTransactionCount} transaksi — dipotong Refund deposit`,
     },
     {
       label: "Pengeluaran manajemen",
@@ -191,7 +194,7 @@ export function buildLaporanExportPayloadV1(params: {
     {
       label: "P&L Manajemen",
       value: formatRp(finBreak.plManajemenNominal),
-      note: "Margin tanpa deposit − pengeluaran manajemen",
+      note: "Margin tanpa deposit − pengeluaran manajemen (kecuali Refund deposit)",
     },
   ];
 
@@ -213,6 +216,7 @@ export function buildLaporanExportPayloadV1(params: {
       pemasukanKosTotal: finBreak.pemasukanKosTotal,
       pemasukanManajemenTotal: finBreak.pemasukanManajemenTotal,
       depositKamarPemasukanTotal: finBreak.depositKamarPemasukanTotal,
+      refundDepositPengeluaranTotal: finBreak.refundDepositPengeluaranTotal,
       pengeluaranKosTotal: finBreak.pengeluaranKosTotal,
       pengeluaranManajemenTotal: finBreak.pengeluaranManajemenTotal,
       plKosNominal: finBreak.plKosNominal,

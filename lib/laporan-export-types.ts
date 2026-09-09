@@ -78,8 +78,9 @@ export type LaporanExportPayloadV1 = {
     pemasukanKosTotal: number;
     /** Total nominal pemasukan manajemen (margin operasional, tanpa deposit kamar). */
     pemasukanManajemenTotal: number;
-    /** Deposit kamar — tidak dipotong P&L manajemen. */
+    /** Deposit kamar neto (setelah POS Refund deposit). Tidak masuk P&L operasional. */
     depositKamarPemasukanTotal?: number;
+    refundDepositPengeluaranTotal?: number;
     pengeluaranKosTotal: number;
     pengeluaranManajemenTotal: number;
     /** P&L kos: pemasukan kos − pengeluaran kos. */

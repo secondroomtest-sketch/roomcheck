@@ -35,6 +35,11 @@ function mapFinanceRow(row: Record<string, unknown>): FinanceRow {
       : row.created_at
         ? String(row.created_at)
         : undefined,
+    createdAt: row.created_at
+      ? String(row.created_at)
+      : row.updated_at
+        ? String(row.updated_at)
+        : undefined,
   };
 }
 
@@ -89,7 +94,7 @@ export default async function FinancePage() {
     const client = createClient(supabaseUrl, supabaseAnonKey);
 
     const [{ data: financeRows }, { data: posRows }] = await Promise.all([
-      client.from("finance").select("*").order("updated_at", { ascending: false }),
+      client.from("finance").select("*").order("created_at", { ascending: false }),
       client.from("finance_kategori").select("*"),
     ]);
 

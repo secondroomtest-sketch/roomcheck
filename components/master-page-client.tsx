@@ -29,7 +29,7 @@ import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
 import { emitCloudDataResync } from "@/lib/cloud-resync";
 import type { PengeluaranScope } from "@/lib/pengeluaran-scope";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
-import { FINANCE_POS_SEWA_KAMAR } from "@/lib/penghuni-finance-payment-sync";
+import { FINANCE_POS_REFUND_DEPOSIT, FINANCE_POS_SEWA_KAMAR } from "@/lib/penghuni-finance-payment-sync";
 import {
   pageFieldClass,
   pageLabelClass,
@@ -1083,8 +1083,15 @@ export default function MasterPageClient({
               </div>
               {isPengeluaranTipe(financeForm.tipe) ? (
                 <p className="mt-1 text-[11px] leading-snug text-[#6b6f8a] dark:text-[#a8add4]">
-                  Tipe ini otomatis menentukan lingkup P&amp;L. Untuk pemasukan kos, gunakan POS "Sewa kamar" atau
-                  "Booking fee"; POS pemasukan lainnya masuk pemasukan manajemen.
+                  Tipe ini otomatis menentukan lingkup P&amp;L. Untuk pemasukan kos, gunakan POS &quot;Sewa kamar&quot; atau
+                  &quot;Booking fee&quot;; POS pemasukan lainnya masuk pemasukan manajemen.
+                  {financeForm.tipe === "Pengeluaran manajemen" ? (
+                    <>
+                      {" "}
+                      Nama POS &quot;{FINANCE_POS_REFUND_DEPOSIT}&quot; memotong total deposit kamar; POS manajemen lain
+                      memotong P&amp;L operasional.
+                    </>
+                  ) : null}
                 </p>
               ) : null}
               <ActionButtonWithIcon

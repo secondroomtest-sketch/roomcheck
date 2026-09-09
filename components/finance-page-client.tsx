@@ -61,6 +61,7 @@ import { financePageRowToReportRow } from "@/lib/laporan-finance-page-row-to-rep
 import {
   isForcedPemasukanManajemenFinancePos,
   isPengeluaranKosReportRow,
+  isRefundDepositPengeluaranReportRow,
 } from "@/lib/laporan-finance-breakdown";
 import { computeMonthlyChartData } from "@/lib/laporan-monthly-chart-data";
 import { openLaporanCetakTabWithPayload } from "@/lib/laporan-open-cetak-tab";
@@ -106,6 +107,8 @@ export type FinanceRow = {
   pelaporanBulan?: string;
   /** Mengelompokkan pecahan pembayaran sewa (nota sama). */
   paymentSplitGroupId?: string;
+  /** Waktu baris dibuat (urutan post terbaru). */
+  createdAt?: string;
   /** Timestamp update terakhir (untuk urutan recent update). */
   updatedAt?: string;
 };
@@ -183,14 +186,25 @@ function isSewaKamarPemasukanRow(row: FinanceRow): boolean {
   return row.kategori === "Pemasukan" && isPosSewaKamar(row.pos);
 }
 
-/** Urutkan riwayat: tanggal input payment terbaru di atas. */
+function notaNumericKey(noNota: string): number {
+  return Number(String(noNota ?? "").replace(/\D/g, "")) || 0;
+}
+
+/** Urutkan riwayat: post terbaru di atas (dibuat → nomor nota → tanggal transaksi). */
 function sortFinanceRowsDesc(rows: FinanceRow[]): FinanceRow[] {
   return [...rows].sort((a, b) => {
+    const ca = String(a.createdAt ?? a.updatedAt ?? "");
+    const cb = String(b.createdAt ?? b.updatedAt ?? "");
+    if (ca !== cb) {
+      if (!ca) return 1;
+      if (!cb) return -1;
+      const posted = cb.localeCompare(ca);
+      if (posted !== 0) return posted;
+    }
+    const nota = notaNumericKey(b.noNota) - notaNumericKey(a.noNota);
+    if (nota !== 0) return nota;
     const td = String(b.tanggal || "").localeCompare(String(a.tanggal || ""));
     if (td !== 0) return td;
-    // Stabil untuk nota yang sama / input sehari: yang terakhir diubah tetap di atas.
-    const ud = String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
-    if (ud !== 0) return ud;
     return String(b.id).localeCompare(String(a.id));
   });
 }
@@ -331,15 +345,17 @@ function FinanceRiwayatTableBlock({
 
   const visibleRows = useMemo(() => {
     const q = normalizeNotaKey(notaQuery);
-    if (!q) return rows;
-    const qDigits = q.replace(/^sr/, "");
-    return rows.filter((row) => {
-      const nota = normalizeNotaKey(row.noNota);
-      if (!nota) return false;
-      if (nota.includes(q)) return true;
-      const notaDigits = nota.replace(/^sr/, "");
-      return Boolean(qDigits) && notaDigits.includes(qDigits);
-    });
+    const source = q
+      ? rows.filter((row) => {
+          const nota = normalizeNotaKey(row.noNota);
+          if (!nota) return false;
+          if (nota.includes(q)) return true;
+          const qDigits = q.replace(/^sr/, "");
+          const notaDigits = nota.replace(/^sr/, "");
+          return Boolean(qDigits) && notaDigits.includes(qDigits);
+        })
+      : rows;
+    return sortFinanceRowsDesc(source);
   }, [notaQuery, rows]);
 
   const sumNominal = sumNominalRows(visibleRows);
@@ -1056,19 +1072,28 @@ export default function FinancePageClient({
     () => sumNominalRows(riwayatPengeluaranManajemenRows),
     [riwayatPengeluaranManajemenRows]
   );
-  const sumDepositKamarNominal = useMemo(
+  const sumRefundDepositNominal = useMemo(
+    () =>
+      sumNominalRows(
+        filteredFinanceData.filter((r) => isRefundDepositPengeluaranReportRow(r))
+      ),
+    [filteredFinanceData]
+  );
+  const sumDepositKamarGrossNominal = useMemo(
     () =>
       sumNominalRows(
         filteredFinanceData.filter((r) => r.kategori === "Pemasukan" && isDepositFinancePos(r.pos))
       ),
     [filteredFinanceData]
   );
-  const sumMarginManajemenOperasionalNominal = sumNonSewaPemasukanNominal - sumDepositKamarNominal;
+  const sumDepositKamarNominal = sumDepositKamarGrossNominal - sumRefundDepositNominal;
+  const sumPengeluaranManajemenUntukPl = sumPengeluaranManajemenNominal - sumRefundDepositNominal;
+  const sumMarginManajemenOperasionalNominal = sumNonSewaPemasukanNominal - sumDepositKamarGrossNominal;
   const plKosSewaMinusPengeluaranKos =
     financeRiwayatKategori === "Semua" ? sumSewaKamarNominal - sumPengeluaranKosNominal : null;
   const plManajemenMarginMinusPengeluaran =
     financeRiwayatKategori === "Semua"
-      ? sumMarginManajemenOperasionalNominal - sumPengeluaranManajemenNominal
+      ? sumMarginManajemenOperasionalNominal - sumPengeluaranManajemenUntukPl
       : null;
 
   const formLokasiOptions = useMemo(() => {
@@ -1266,6 +1291,8 @@ export default function FinancePageClient({
             keterangan: ins.keterangan,
             pelaporanBulan: ins.pelaporanBulan,
             paymentSplitGroupId: ins.paymentSplitGroupId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           });
         }
         writeSandboxJson(SB_KEY.finance, nextFin);
@@ -1285,7 +1312,7 @@ export default function FinancePageClient({
       { data: blokMasterRows },
       { data: kamarRows },
     ] = await Promise.all([
-      supabase.from("finance").select("*").order("updated_at", { ascending: false }),
+      supabase.from("finance").select("*").order("created_at", { ascending: false }),
       supabase
         .from("finance_kategori")
         .select("id, nama_pos, tipe, pengeluaran_scope, pemasukan_scope, pemasukan_kind"),
@@ -1418,6 +1445,11 @@ export default function FinancePageClient({
           : rec.created_at
             ? String(rec.created_at)
             : undefined,
+        createdAt: rec.created_at
+          ? String(rec.created_at)
+          : rec.updated_at
+            ? String(rec.updated_at)
+            : undefined,
       };
     });
 
@@ -1540,6 +1572,11 @@ export default function FinancePageClient({
             ? String(rec.updated_at)
             : rec.created_at
               ? String(rec.created_at)
+              : undefined,
+          createdAt: rec.created_at
+            ? String(rec.created_at)
+            : rec.updated_at
+              ? String(rec.updated_at)
               : undefined,
         };
       });
@@ -1756,6 +1793,7 @@ export default function FinancePageClient({
         keterangan: form.keterangan,
         pelaporanBulan: pelaporanSql ?? undefined,
         paymentSplitGroupId: splitGid ? splitGid : undefined,
+        createdAt: editingId ? editingRow?.createdAt ?? new Date().toISOString() : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       const next = editingId
@@ -2120,8 +2158,8 @@ export default function FinancePageClient({
             />
             <p className="mt-2 text-[12px] leading-relaxed text-[#7f6344] dark:text-[#b79a78]">
               Pemetaan dua P&amp;L mengikuti Master: kos (sewa kamar − pengeluaran kos) dan manajemen (margin
-              tanpa deposit kamar − pengeluaran manajemen). Deposit kamar tetap utuh. Ringkasan di bagian
-              bawah muncul jika kategori &quot;Semua&quot;.
+              tanpa deposit kamar − pengeluaran manajemen selain Refund deposit). POS Refund deposit memotong
+              total deposit kamar. Ringkasan di bagian bawah muncul jika kategori &quot;Semua&quot;.
             </p>
           </div>
           <div className="flex w-full min-w-0 shrink-0 flex-col gap-2 sm:w-auto md:max-w-none md:flex-row md:flex-wrap md:justify-end">
@@ -2352,7 +2390,7 @@ export default function FinancePageClient({
 
           <FinanceRiwayatTableBlock
             title="Riwayat — Pemasukan di luar sewa kamar"
-            hint="Dasar P&amp;L manajemen: pemasukan selain sewa kamar. Deposit kamar tetap tercatat di sini, tetapi tidak dipotong pengeluaran (lihat ringkasan P&amp;L)."
+            hint="Dasar P&amp;L manajemen: pemasukan selain sewa kamar. Deposit kamar tercatat di sini; hanya POS Refund deposit yang memotong total deposit (lihat ringkasan P&amp;L)."
             rows={riwayatNonSewaKamarPemasukanRows}
             isLoading={isLoading}
             footerSumLabel="Total margin manajemen (SUM nominal)"
@@ -2385,7 +2423,7 @@ export default function FinancePageClient({
 
           <FinanceRiwayatTableBlock
             title="Riwayat — Pengeluaran manajemen"
-            hint="POS pengeluaran dengan lingkup &quot;manajemen&quot; di Master. Dipotong dari margin tanpa deposit kamar."
+            hint="POS pengeluaran dengan lingkup &quot;manajemen&quot; di Master. POS selain Refund deposit dipotong dari margin tanpa deposit. POS Refund deposit memotong total deposit kamar."
             rows={riwayatPengeluaranManajemenRows}
             isLoading={isLoading}
             footerSumLabel="Total pengeluaran manajemen (SUM nominal)"
@@ -2426,7 +2464,7 @@ export default function FinancePageClient({
               <p className="mt-3 text-[#2d2217] dark:text-[#f6e9d5]">
                 <span className="font-medium">P&amp;L manajemen</span>
                 {" "}
-                (margin tanpa deposit − pengeluaran manajemen):{" "}
+                (margin tanpa deposit − pengeluaran manajemen selain Refund deposit):{" "}
                 <span
                   className={`font-semibold tabular-nums ${
                     plManajemenMarginMinusPengeluaran < 0
@@ -2439,10 +2477,13 @@ export default function FinancePageClient({
               </p>
               <p className="mt-1 text-xs text-[#6b5238] dark:text-[#b79a78]">
                 {formatNominalDisplay(String(sumMarginManajemenOperasionalNominal))} −{" "}
-                {formatNominalDisplay(String(sumPengeluaranManajemenNominal))}
+                {formatNominalDisplay(String(sumPengeluaranManajemenUntukPl))}
               </p>
               <p className="mt-1 text-xs text-[#6b5238] dark:text-[#b79a78]">
-                Deposit kamar (tidak dipotong): {formatNominalDisplay(String(sumDepositKamarNominal))}
+                Deposit kamar (setelah Refund deposit): {formatNominalDisplay(String(sumDepositKamarNominal))}
+                {sumRefundDepositNominal > 0
+                  ? ` · refund ${formatNominalDisplay(String(sumRefundDepositNominal))}`
+                  : ""}
               </p>
               <p className="mt-2 border-t border-[#dcc7aa] pt-2 text-[11px] leading-snug text-[#7f6344] dark:text-[#b79a78]">
                 Transaksi lama tanpa kolom lingkup di database diperlakukan sebagai pengeluaran kos setelah migrasi
