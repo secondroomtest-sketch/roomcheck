@@ -7,6 +7,7 @@ import {
 } from "@/lib/laporan-cetak-filters";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
 import { formatPenghuniStatusLabel } from "@/lib/penghuni-status-label";
+import { monthKeyFromFinanceRow } from "@/lib/laporan-report-dates";
 
 function esc(s: string): string {
   return String(s ?? "")
@@ -124,6 +125,7 @@ export function buildLaporanStandaloneHtml(
       (f) => `
     <tr>
       <td>${esc(f.tanggal)}</td>
+      <td>${esc(monthKeyFromFinanceRow(f) || "—")}</td>
       <td>${esc(f.pos?.trim() || "—")}</td>
       <td style="text-align:right">${esc(formatRp(f.nominal))}</td>
       <td>${esc(f.lokasiKos)}</td>
@@ -137,10 +139,10 @@ export function buildLaporanStandaloneHtml(
       (f) => `
     <tr>
       <td>${esc(f.tanggal)}</td>
+      <td>${esc(monthKeyFromFinanceRow(f) || "—")}</td>
       <td>${esc(normalizePengeluaranScope(f.pengeluaranScope) === "manajemen" ? "Manajemen" : "Kos")}</td>
       <td style="text-align:right">${esc(formatRp(f.nominal))}</td>
-      <td>${esc(f.lokasiKos)}</td>
-      <td>${esc(f.unitBlok)}</td>
+      <td>${esc(f.keterangan?.trim() || "—")}</td>
     </tr>`
     )
     .join("");
@@ -245,7 +247,7 @@ export function buildLaporanStandaloneHtml(
       <div><strong>Pengguna:</strong> ${esc(payload.currentUserName)}</div>
       <div><strong>Mode:</strong> ${payload.localDemoMode ? "Demo lokal" : "Cloud"}</div>
       <div><strong>Role (revenue):</strong> ${esc(payload.userProfileRole ?? "—")}</div>
-      <div><strong>Periode (finance):</strong> ${esc(filters.startDate)} — ${esc(filters.endDate)}</div>
+      <div><strong>Periode (bulan P&amp;L):</strong> ${esc(filters.startDate)} — ${esc(filters.endDate)}</div>
       <div><strong>Filter lokasi / unit:</strong> ${esc(filters.selectedLokasi)} · ${esc(filters.selectedUnit)}</div>
       <div><strong>Fokus laporan:</strong> ${esc(fokusMetaPlain)}</div>
     </div>
@@ -264,12 +266,12 @@ export function buildLaporanStandaloneHtml(
     </table>
     <h2>Detail pemasukan (${esc(String(pemSource.length))}${pemSource.length > maxFinance ? `, menampilkan ${maxFinance} pertama` : ""})</h2>
     <table>
-      <thead><tr><th>Tanggal</th><th>POS</th><th>Nominal</th><th>Lokasi</th><th>Unit</th></tr></thead>
-      <tbody>${pemRowsHtml || "<tr><td colspan='5'>Tidak ada data</td></tr>"}</tbody>
+      <thead><tr><th>Tanggal</th><th>Bulan P&amp;L</th><th>POS</th><th>Nominal</th><th>Lokasi</th><th>Unit</th></tr></thead>
+      <tbody>${pemRowsHtml || "<tr><td colspan='6'>Tidak ada data</td></tr>"}</tbody>
     </table>
     <h2>Detail pengeluaran (${esc(String(pengSource.length))}${pengSource.length > maxFinance ? `, menampilkan ${maxFinance} pertama` : ""})</h2>
     <table>
-      <thead><tr><th>Tanggal</th><th>Lingkup</th><th>Nominal</th><th>Lokasi</th><th>Unit</th></tr></thead>
+      <thead><tr><th>Tanggal</th><th>Bulan P&amp;L</th><th>Lingkup</th><th>Nominal</th><th>Keterangan</th></tr></thead>
       <tbody>${pengRowsHtml || "<tr><td colspan='5'>Tidak ada data</td></tr>"}</tbody>
     </table>
     <h2>Penghuni (${esc(String(penghuniRows.length))})</h2>
@@ -307,7 +309,7 @@ export function buildEmailBodySummary(payload: LaporanExportPayloadV1): string {
     `Dibuat: ${formatIdDateTime(payload.generatedAt)}`,
     `Oleh: ${payload.currentUserName}`,
     `Role: ${payload.userProfileRole ?? "—"}`,
-    `Periode finance: ${f.startDate} s/d ${f.endDate}`,
+    `Periode bulan P&L: ${f.startDate} s/d ${f.endDate}`,
     `Filter: ${f.selectedLokasi} | ${f.selectedUnit}`,
     fokusLine,
     ``,

@@ -1,4 +1,5 @@
 import type { PenghuniRow, SurveyCalonRow } from "@/components/penghuni-page-client";
+import { pelaporanBulanIsoFromDbRecord } from "@/lib/finance-pelaporan-bulan-from-db";
 import { sanitizePenghuniPaymentFlags } from "@/lib/penghuni-finance-payment-sync";
 import type { ReportFinanceRow, ReportKamarRow } from "@/lib/laporan-export-types";
 import { pengeluaranScopeForKategori } from "@/lib/pengeluaran-scope";
@@ -24,9 +25,11 @@ export function mapCloudFinanceRow(
     nominal: Number(row.nominal ?? 0),
     lokasiKos: String(row.lokasi_kos ?? penghuniData?.lokasiKos ?? "Unknown"),
     unitBlok: String(row.unit_blok ?? penghuniData?.unitBlok ?? "Unknown"),
+    keterangan: String(row.keterangan ?? ""),
     pos: String(row.pos ?? ""),
     pengeluaranScope:
       pengeluaranScopeForKategori(kategori, row.pengeluaran_scope ?? row.pengeluaranScope) ?? null,
+    pelaporanBulan: pelaporanBulanIsoFromDbRecord(row) ?? "",
   };
 }
 

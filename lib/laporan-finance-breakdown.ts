@@ -15,8 +15,10 @@ export function financeUiRowsToReportRows(
     nominal: string | number;
     lokasiKos: string;
     unitBlok: string;
+    keterangan?: string;
     pos?: string;
     pengeluaranScope?: PengeluaranScope | null;
+    pelaporanBulan?: string;
   }>
 ): ReportFinanceRow[] {
   return rows.map((r) => ({
@@ -29,8 +31,10 @@ export function financeUiRowsToReportRows(
         : Number(String(r.nominal).replace(/\D/g, "")) || 0,
     lokasiKos: r.lokasiKos,
     unitBlok: r.unitBlok,
+    keterangan: r.keterangan ?? "",
     pos: r.pos,
     pengeluaranScope: r.pengeluaranScope,
+    pelaporanBulan: r.pelaporanBulan ?? "",
   }));
 }
 

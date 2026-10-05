@@ -13,10 +13,14 @@ export type ReportFinanceRow = {
   nominal: number;
   lokasiKos: string;
   unitBlok: string;
+  /** Catatan baris finance (untuk kolom Keterangan di detail pengeluaran). */
+  keterangan?: string;
   /** POS finance (untuk aturan revenue owner di ringkasan). */
   pos?: string;
   /** Hanya Pengeluaran: kos vs manajemen (dari Master / kolom finance). */
   pengeluaranScope?: PengeluaranScope | null;
+  /** Alokasi bulan P&L (YYYY-MM-DD tanggal 1); sewa pecahan 3/6 bulan diakui di sini, bukan hanya tanggal bayar. */
+  pelaporanBulan?: string;
 };
 
 export type ReportKamarRow = {

@@ -7,7 +7,7 @@ import {
   isRefundDepositPengeluaranReportRow,
 } from "@/lib/laporan-finance-breakdown";
 import { normalizePengeluaranScope } from "@/lib/pengeluaran-scope";
-import { monthKeyFromYmd } from "@/lib/laporan-report-dates";
+import { monthKeyFromFinanceRow } from "@/lib/laporan-report-dates";
 
 export type LaporanMonthlyChartDatum = LaporanMonthlyFinanceRow & {
   pemasukanSewaKamar: number;
@@ -19,7 +19,7 @@ export function computeMonthlyChartData(filteredFinance: ReportFinanceRow[]): La
   const collector = new Map<string, LaporanMonthlyFinanceRow>();
 
   filteredFinance.forEach((row) => {
-    const monthKey = monthKeyFromYmd(row.tanggal);
+    const monthKey = monthKeyFromFinanceRow(row);
     if (!monthKey) return;
 
     const existing =

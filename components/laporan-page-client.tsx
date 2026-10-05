@@ -30,7 +30,12 @@ import { buildLaporanExportPayloadV1 } from "@/lib/laporan-export-payload";
 import { financePageRowToReportRow } from "@/lib/laporan-finance-page-row-to-report";
 import { computeMonthlyChartData } from "@/lib/laporan-monthly-chart-data";
 import { openLaporanCetakTabWithPayload } from "@/lib/laporan-open-cetak-tab";
-import { financeRowInYmdInclusiveRange, ymdRangeInvalidOrTooLong } from "@/lib/laporan-report-dates";
+import {
+  clampYmdRangeToMaxYear,
+  collectFinancePnlBoundaryYmds,
+  financeRowInPelaporanYmdInclusiveRange,
+  ymdRangeInvalidOrTooLong,
+} from "@/lib/laporan-report-dates";
 import { type ReportFinanceRow, type ReportKamarRow } from "@/lib/laporan-export-types";
 import { readDemoProfileSession } from "@/lib/demo-auth";
 import { normalizeUserProfileRole } from "@/lib/user-profile-role";
@@ -397,15 +402,13 @@ export default function LaporanPageClient({
    */
   useEffect(() => {
     if (dateRangeInitialized) return;
-    const dates = effectiveFinanceRows
-      .map((r) => String(r.tanggal ?? "").slice(0, 10))
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort((a, b) => a.localeCompare(b));
+    const dates = collectFinancePnlBoundaryYmds(effectiveFinanceRows);
     if (!dates.length) return;
-    setDraftFilterStartDate(dates[0]);
-    setDraftFilterEndDate(dates[dates.length - 1]);
-    setAppliedFilterStartDate(dates[0]);
-    setAppliedFilterEndDate(dates[dates.length - 1]);
+    const clamped = clampYmdRangeToMaxYear(dates[0], dates[dates.length - 1]);
+    setDraftFilterStartDate(clamped.start);
+    setDraftFilterEndDate(clamped.end);
+    setAppliedFilterStartDate(clamped.start);
+    setAppliedFilterEndDate(clamped.end);
     setDateRangeInitialized(true);
   }, [dateRangeInitialized, effectiveFinanceRows]);
 
@@ -560,7 +563,11 @@ export default function LaporanPageClient({
 
   const filteredFinance = useMemo(() => {
     return effectiveFinanceRows.filter((row) => {
-      const inDateRange = financeRowInYmdInclusiveRange(row, appliedFilterStartDate, appliedFilterEndDate);
+      const inDateRange = financeRowInPelaporanYmdInclusiveRange(
+        row,
+        appliedFilterStartDate,
+        appliedFilterEndDate
+      );
       const lokasiMatch = selectedLokasi === LOKASI_SEMUA || row.lokasiKos === selectedLokasi;
       const unitMatch = selectedUnit === UNIT_SEMUA || row.unitBlok === selectedUnit;
       return inDateRange && lokasiMatch && unitMatch;
@@ -716,20 +723,18 @@ export default function LaporanPageClient({
   };
 
   const handleResetFullDateRange = () => {
-    const dates = effectiveFinanceRows
-      .map((r) => String(r.tanggal ?? "").slice(0, 10))
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort((a, b) => a.localeCompare(b));
+    const dates = collectFinancePnlBoundaryYmds(effectiveFinanceRows);
     if (!dates.length) {
       const msg = "Belum ada data finance untuk reset rentang tanggal.";
       setErrorMessage(msg);
       toast(msg, "info");
       return;
     }
-    setDraftFilterStartDate(dates[0]);
-    setDraftFilterEndDate(dates[dates.length - 1]);
-    setAppliedFilterStartDate(dates[0]);
-    setAppliedFilterEndDate(dates[dates.length - 1]);
+    const clamped = clampYmdRangeToMaxYear(dates[0], dates[dates.length - 1]);
+    setDraftFilterStartDate(clamped.start);
+    setDraftFilterEndDate(clamped.end);
+    setAppliedFilterStartDate(clamped.start);
+    setAppliedFilterEndDate(clamped.end);
     setErrorMessage("");
     toast("Rentang tanggal direset ke seluruh periode data.", "success");
   };
@@ -909,9 +914,11 @@ export default function LaporanPageClient({
         ) : null}
         <p className="rounded-xl border border-[#d6ddff] bg-[#f7f8ff] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#4f61aa] sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm dark:border-[#424a80] dark:bg-[#1b1f3d] dark:text-[#dbe3ff]">
           Setelah mengubah <span className="font-semibold">Mulai</span> / <span className="font-semibold">Sampai</span>, ketuk{" "}
-          <span className="font-semibold">Tampilkan</span> untuk memuat ulang grafik dan tabel. Grafik membedakan P&amp;L kos
-          (sewa − pengeluaran kos) dan P&amp;L manajemen (margin − pengeluaran manajemen). Tab laporan lengkap membuka popup
-          pilihan struktur kos vs manajemen.
+          <span className="font-semibold">Tampilkan</span> untuk memuat ulang grafik dan tabel. Periode memakai{" "}
+          <span className="font-semibold">bulan P&amp;L</span> (sama seperti filter pelaporan di Finance): sewa yang dibayar
+          sekaligus untuk beberapa bulan dipecah dan diakui di masing-masing bulan, bukan hanya di tanggal payment. Grafik
+          membedakan P&amp;L kos (sewa − pengeluaran kos) dan P&amp;L manajemen (margin − pengeluaran manajemen). Tab laporan
+          lengkap membuka popup pilihan struktur kos vs manajemen.
         </p>
 
         <section className={lapSectionClass}>

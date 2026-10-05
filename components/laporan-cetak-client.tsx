@@ -12,6 +12,7 @@ import {
 import { buildEmailBodySummary } from "@/lib/laporan-export-html";
 import { LAPORAN_CARD_SURFACE_CLASSES } from "@/lib/laporan-dashboard-card-styles";
 import { formatPenghuniStatusLabel } from "@/lib/penghuni-status-label";
+import { monthKeyFromFinanceRow } from "@/lib/laporan-report-dates";
 
 function formatRp(n: number): string {
   const v = Number(n);
@@ -238,6 +239,7 @@ export default function LaporanCetakClient() {
                 <dt className="font-semibold text-[#6b5238]">Periode finance</dt>
                 <dd>
                   {f.startDate} — {f.endDate}
+                  <span className="mt-0.5 block text-[11px] font-normal text-[#8c6d47]">Bulan P&L (split sewa)</span>
                 </dd>
               </div>
               <div>
@@ -462,6 +464,7 @@ export default function LaporanCetakClient() {
               <thead className="sticky top-0 bg-[#f4e6d0] text-[#4a3824] print:static">
                 <tr>
                   <th className="px-2 py-2">Tanggal</th>
+                  <th className="px-2 py-2">Bulan P&L</th>
                   <th className="px-2 py-2">POS</th>
                   <th className="px-2 py-2">Nominal</th>
                   <th className="px-2 py-2">Lokasi</th>
@@ -472,6 +475,7 @@ export default function LaporanCetakClient() {
                 {pemFinanceTable.map((row) => (
                   <tr key={row.id} className="border-b border-[#f4eadc] sr-print-tr">
                     <td className="px-2 py-1.5 whitespace-nowrap">{row.tanggal}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">{monthKeyFromFinanceRow(row) || "—"}</td>
                     <td className="px-2 py-1.5">{row.pos?.trim() || "—"}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{formatRp(row.nominal)}</td>
                     <td className="px-2 py-1.5">{row.lokasiKos}</td>
@@ -493,18 +497,18 @@ export default function LaporanCetakClient() {
               <thead className="sticky top-0 bg-[#f4e6d0] text-[#4a3824] print:static">
                 <tr>
                   <th className="px-2 py-2">Tanggal</th>
+                  <th className="px-2 py-2">Bulan P&L</th>
                   <th className="px-2 py-2">Nominal</th>
-                  <th className="px-2 py-2">Lokasi</th>
-                  <th className="px-2 py-2">Unit</th>
+                  <th className="px-2 py-2">Keterangan</th>
                 </tr>
               </thead>
               <tbody>
                 {pengFinanceTable.map((row) => (
                   <tr key={row.id} className="border-b border-[#f4eadc] sr-print-tr">
                     <td className="px-2 py-1.5 whitespace-nowrap">{row.tanggal}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">{monthKeyFromFinanceRow(row) || "—"}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{formatRp(row.nominal)}</td>
-                    <td className="px-2 py-1.5">{row.lokasiKos}</td>
-                    <td className="px-2 py-1.5">{row.unitBlok}</td>
+                    <td className="px-2 py-1.5">{row.keterangan?.trim() || "—"}</td>
                   </tr>
                 ))}
               </tbody>
