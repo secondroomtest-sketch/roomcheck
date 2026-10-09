@@ -72,6 +72,8 @@ import LaporanLengkapChoiceModal from "@/components/laporan-lengkap-choice-modal
 export type { ReportFinanceRow, ReportKamarRow } from "@/lib/laporan-export-types";
 
 const pieColors = ["#2563eb", "#16a34a", "#dc2626"];
+/** Default Recharts -1×-1 memicu warning sebelum ResizeObserver mengukur container. */
+const CHART_INITIAL_DIMENSION = { width: 1, height: 1 };
 const LOKASI_SEMUA = "Semua Lokasi";
 const UNIT_SEMUA = "Semua Blok/Unit";
 
@@ -1028,7 +1030,7 @@ export default function LaporanPageClient({
           <div className="h-[min(17.5rem,max(13.75rem,45vw))] w-full min-h-0 sm:h-[17rem] md:h-80 lg:h-[21rem]">
             {chartReady ? (
               <>
-                <ResponsiveContainer>
+                <ResponsiveContainer initialDimension={CHART_INITIAL_DIMENSION}>
                   <LineChart
                     data={monthlyChartData}
                     margin={{
@@ -1102,7 +1104,7 @@ export default function LaporanPageClient({
             <div className="h-[min(16rem,max(12.75rem,40vw))] w-full min-h-0 sm:h-[16rem] md:h-80 lg:h-[21rem]">
             {chartReady ? (
               <>
-                <ResponsiveContainer>
+                <ResponsiveContainer initialDimension={CHART_INITIAL_DIMENSION}>
                   <BarChart
                     data={monthlyChartData}
                     margin={{
@@ -1151,7 +1153,7 @@ export default function LaporanPageClient({
           <div className="h-[min(17.25rem,max(13.5rem,44vw))] w-full min-h-0 sm:h-[17rem] md:h-80 lg:h-[24rem]">
             {chartReady ? (
               <>
-                <ResponsiveContainer>
+                <ResponsiveContainer initialDimension={CHART_INITIAL_DIMENSION}>
                   <PieChart
                     margin={{
                       top: chartCompact ? 0 : 4,
