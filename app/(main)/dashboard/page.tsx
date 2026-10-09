@@ -25,6 +25,8 @@ import {
 import { iconTone } from "@/lib/ui-accent";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
 import StatusBadge from "@/components/ui/status-badge";
+import SortableTh from "@/components/ui/sortable-th";
+import { parseNominal, useTableSort, type SortAccessors } from "@/lib/table-sort";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, SB_KEY } from "@/lib/sandbox-storage";
@@ -57,6 +59,35 @@ import type { KamarRow } from "@/components/kamar-page-client";
 
 const LOKASI_SEMUA = "Semua Lokasi";
 const UNIT_SEMUA = "Semua Blok/Unit";
+
+const DASHBOARD_SURVEY_SORT: SortAccessors<SurveyCalonRow, "nama" | "unit" | "rencanaCheckIn" | "negosiasi" | "keterangan"> = {
+  nama: (r) => r.namaLengkap,
+  unit: (r) => r.unitBlok,
+  rencanaCheckIn: (r) => r.rencanaCheckIn,
+  negosiasi: (r) => parseNominal(r.negosiasiHarga),
+  keterangan: (r) => r.keterangan,
+};
+
+type DashboardPengeluaranRow = { kategori: string; lingkup: string; tanggal: string; nominal: string; status: string };
+type DashboardPemasukanRow = { sumber: string; tanggal: string; nominal: string; status: string };
+
+const DASHBOARD_PENGELUARAN_SORT: SortAccessors<
+  DashboardPengeluaranRow,
+  "kategori" | "lingkup" | "tanggal" | "nominal" | "status"
+> = {
+  kategori: (r) => r.kategori,
+  lingkup: (r) => r.lingkup,
+  tanggal: (r) => r.tanggal,
+  nominal: (r) => parseNominal(r.nominal),
+  status: (r) => r.status,
+};
+
+const DASHBOARD_PEMASUKAN_SORT: SortAccessors<DashboardPemasukanRow, "sumber" | "tanggal" | "nominal" | "status"> = {
+  sumber: (r) => r.sumber,
+  tanggal: (r) => r.tanggal,
+  nominal: (r) => parseNominal(r.nominal),
+  status: (r) => r.status,
+};
 
 function canSelectAllLokasiDanBlok(role: string): boolean {
   const r = String(role ?? "")
@@ -1120,6 +1151,24 @@ export default function DashboardPage() {
     [displayPemasukan]
   );
 
+  const penghuniSortAccessors = useMemo(
+    () => ({
+      nama: (r: (typeof displayPenghuni)[number]) => r.nama,
+      unit: (r: (typeof displayPenghuni)[number]) => r.unit,
+      status: (r: (typeof displayPenghuni)[number]) => r.status,
+      checkIn: (r: (typeof displayPenghuni)[number]) => r.checkIn,
+      checkOut: (r: (typeof displayPenghuni)[number]) =>
+        penghuniListFilter === "booking" ? parseNominal(r.bookingFeeFormatted) : r.checkOut,
+      sisaHari: (r: (typeof displayPenghuni)[number]) => r.daysUntilCheckout,
+      tagihan: (r: (typeof displayPenghuni)[number]) => r.tagihan,
+    }),
+    [penghuniListFilter]
+  );
+  const penghuniSort = useTableSort(displayPenghuni, penghuniSortAccessors);
+  const surveySort = useTableSort(surveyDashboardRows, DASHBOARD_SURVEY_SORT);
+  const pengeluaranSort = useTableSort(displayPengeluaran, DASHBOARD_PENGELUARAN_SORT);
+  const pemasukanSort = useTableSort(displayPemasukan, DASHBOARD_PEMASUKAN_SORT);
+
   return (
     <div className="min-w-0 max-w-[100vw] space-y-4 overflow-x-clip sm:space-y-6">
       <section className="rounded-2xl border border-[#d8defc]/70 bg-gradient-to-r from-[#f6f8ff] via-[#eef2ff] to-[#f3f1ff] p-4 shadow-[0_22px_70px_-35px_rgba(63,79,157,0.45)] dark:border-[#4f5b99] dark:from-[#1a2144] dark:via-[#1b1f3d] dark:to-[#1f2344] sm:rounded-[2rem] sm:p-6">
@@ -1791,7 +1840,7 @@ export default function DashboardPage() {
           ) : null}
 
           <div className="space-y-3 md:hidden">
-            {displayPenghuni.map((row, index) => (
+            {penghuniSort.sortedRows.map((row, index) => (
               <div
                 key={row.id}
                 className={`rounded-xl border p-3 ${
@@ -1872,21 +1921,26 @@ export default function DashboardPage() {
             <table className="w-full min-w-[44rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
-                  <th className="whitespace-nowrap px-3 py-3">Nama</th>
-                  <th className="whitespace-nowrap px-3 py-3">Unit</th>
-                  <th className="whitespace-nowrap px-3 py-3">Status Kamar</th>
-                  <th className="whitespace-nowrap px-3 py-3">Check In</th>
-                  <th className="whitespace-nowrap px-3 py-3">
-                    {penghuniListFilter === "booking" ? "Booking Fee" : "Check Out"}
-                  </th>
+                  <SortableTh label="Nama" sortKey="nama" activeKey={penghuniSort.sortKey} dir={penghuniSort.sortDir} onSort={penghuniSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Unit" sortKey="unit" activeKey={penghuniSort.sortKey} dir={penghuniSort.sortDir} onSort={penghuniSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Status Kamar" sortKey="status" activeKey={penghuniSort.sortKey} dir={penghuniSort.sortDir} onSort={penghuniSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Check In" sortKey="checkIn" activeKey={penghuniSort.sortKey} dir={penghuniSort.sortDir} onSort={penghuniSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh
+                    label={penghuniListFilter === "booking" ? "Booking Fee" : "Check Out"}
+                    sortKey="checkOut"
+                    activeKey={penghuniSort.sortKey}
+                    dir={penghuniSort.sortDir}
+                    onSort={penghuniSort.toggleSort}
+                    className="whitespace-nowrap px-3 py-3"
+                  />
                   {penghuniListFilter !== "booking" ? (
-                    <th className="whitespace-nowrap px-3 py-3">SISA HARI</th>
+                    <SortableTh label="SISA HARI" sortKey="sisaHari" activeKey={penghuniSort.sortKey} dir={penghuniSort.sortDir} onSort={penghuniSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                   ) : null}
-                  <th className="whitespace-nowrap px-3 py-3">Tagihan</th>
+                  <SortableTh label="Tagihan" sortKey="tagihan" activeKey={penghuniSort.sortKey} dir={penghuniSort.sortDir} onSort={penghuniSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                 </tr>
               </thead>
               <tbody>
-                {displayPenghuni.map((row, index) => (
+                {penghuniSort.sortedRows.map((row, index) => (
                   <tr
                     key={row.id}
                     className={`border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
@@ -1963,7 +2017,7 @@ export default function DashboardPage() {
             Data dari form Survey Baru di halaman Penghuni; urut berdasarkan rencana check-in; mengikuti filter lokasi/unit di atas.
           </p>
           <div className="space-y-3 md:hidden">
-            {surveyDashboardRows.map((row, index) => (
+            {surveySort.sortedRows.map((row, index) => (
               <div
                 key={row.id}
                 className={`rounded-xl border p-3 ${
@@ -2017,15 +2071,15 @@ export default function DashboardPage() {
             <table className="w-full min-w-[40rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-amber-200/90 text-xs uppercase tracking-[0.18em] text-[#8f6a2d] dark:border-[#4a3a22] dark:text-[#dcb97a]">
-                  <th className="whitespace-nowrap px-3 py-3">Nama</th>
-                  <th className="whitespace-nowrap px-3 py-3">Unit</th>
-                  <th className="whitespace-nowrap px-3 py-3">Rencana check-in</th>
-                  <th className="whitespace-nowrap px-3 py-3">Negosiasi</th>
-                  <th className="whitespace-nowrap px-3 py-3">Keterangan</th>
+                  <SortableTh label="Nama" sortKey="nama" activeKey={surveySort.sortKey} dir={surveySort.sortDir} onSort={surveySort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Unit" sortKey="unit" activeKey={surveySort.sortKey} dir={surveySort.sortDir} onSort={surveySort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Rencana check-in" sortKey="rencanaCheckIn" activeKey={surveySort.sortKey} dir={surveySort.sortDir} onSort={surveySort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Negosiasi" sortKey="negosiasi" activeKey={surveySort.sortKey} dir={surveySort.sortDir} onSort={surveySort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Keterangan" sortKey="keterangan" activeKey={surveySort.sortKey} dir={surveySort.sortDir} onSort={surveySort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                 </tr>
               </thead>
               <tbody>
-                {surveyDashboardRows.map((row, index) => (
+                {surveySort.sortedRows.map((row, index) => (
                   <tr
                     key={row.id}
                     className={`border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
@@ -2074,7 +2128,7 @@ export default function DashboardPage() {
             iconClassName={iconTone.warning}
           />
           <div className="space-y-3 md:hidden">
-            {displayPengeluaran.map((row, index) => (
+            {pengeluaranSort.sortedRows.map((row, index) => (
               <div
                 key={row.id}
                 className={`rounded-xl border p-3 ${OWNER_INTERACTIVE_MOTION} ${isOwnerRole ? ownerListCardTheme(index) : "border-rose-200/75 bg-gradient-to-b from-white/95 to-rose-50/30 shadow-sm dark:border-rose-900/35 dark:from-[#1a2144]/98 dark:to-[#281820]/95"}`}
@@ -2125,17 +2179,17 @@ export default function DashboardPage() {
             <table className="w-full min-w-[46rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
-                  <th className="whitespace-nowrap px-3 py-3">Kategori</th>
+                  <SortableTh label="Kategori" sortKey="kategori" activeKey={pengeluaranSort.sortKey} dir={pengeluaranSort.sortDir} onSort={pengeluaranSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                   {!isOwnerRole ? (
-                    <th className="whitespace-nowrap px-3 py-3">Lingkup P&amp;L</th>
+                    <SortableTh label="Lingkup P&L" sortKey="lingkup" activeKey={pengeluaranSort.sortKey} dir={pengeluaranSort.sortDir} onSort={pengeluaranSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                   ) : null}
-                  <th className="whitespace-nowrap px-3 py-3">Tanggal</th>
-                  <th className="whitespace-nowrap px-3 py-3">Nominal</th>
-                  <th className="whitespace-nowrap px-3 py-3">Status</th>
+                  <SortableTh label="Tanggal" sortKey="tanggal" activeKey={pengeluaranSort.sortKey} dir={pengeluaranSort.sortDir} onSort={pengeluaranSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Nominal" sortKey="nominal" activeKey={pengeluaranSort.sortKey} dir={pengeluaranSort.sortDir} onSort={pengeluaranSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Status" sortKey="status" activeKey={pengeluaranSort.sortKey} dir={pengeluaranSort.sortDir} onSort={pengeluaranSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                 </tr>
               </thead>
               <tbody>
-                {displayPengeluaran.map((row, index) => (
+                {pengeluaranSort.sortedRows.map((row, index) => (
                   <tr
                     key={row.id}
                     className={`border-b border-[#e3e9ff]/80 transition-colors duration-150 last:border-none dark:border-[#3a467f]/80 ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}
@@ -2190,7 +2244,7 @@ export default function DashboardPage() {
             iconClassName={iconTone.success}
           />
           <div className="space-y-3 md:hidden">
-            {displayPemasukan.map((row, index) => (
+            {pemasukanSort.sortedRows.map((row, index) => (
               <div
                 key={row.id}
                 className={`rounded-xl border p-3 ${
@@ -2237,14 +2291,14 @@ export default function DashboardPage() {
             <table className="w-full min-w-[38rem] text-left text-sm lg:min-w-0">
               <thead>
                 <tr className="border-b border-[#ecdcc6] text-xs uppercase tracking-[0.18em] text-[#8f724c] dark:border-[#3f3023] dark:text-[#cba97d]">
-                  <th className="whitespace-nowrap px-3 py-3">Sumber</th>
-                  <th className="whitespace-nowrap px-3 py-3">Tanggal</th>
-                  <th className="whitespace-nowrap px-3 py-3">Nominal</th>
-                  <th className="whitespace-nowrap px-3 py-3">Status</th>
+                  <SortableTh label="Sumber" sortKey="sumber" activeKey={pemasukanSort.sortKey} dir={pemasukanSort.sortDir} onSort={pemasukanSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Tanggal" sortKey="tanggal" activeKey={pemasukanSort.sortKey} dir={pemasukanSort.sortDir} onSort={pemasukanSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Nominal" sortKey="nominal" activeKey={pemasukanSort.sortKey} dir={pemasukanSort.sortDir} onSort={pemasukanSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
+                  <SortableTh label="Status" sortKey="status" activeKey={pemasukanSort.sortKey} dir={pemasukanSort.sortDir} onSort={pemasukanSort.toggleSort} className="whitespace-nowrap px-3 py-3" />
                 </tr>
               </thead>
               <tbody>
-                {displayPemasukan.map((row, index) => (
+                {pemasukanSort.sortedRows.map((row, index) => (
                   <tr
                     key={row.id}
                     className={`border-b border-[#e3e9ff] last:border-none dark:border-[#3a467f] ${isOwnerRole ? ownerTableRowTheme(index) : "dark:bg-transparent"}`}

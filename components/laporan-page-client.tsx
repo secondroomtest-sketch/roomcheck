@@ -18,6 +18,8 @@ import {
 } from "recharts";
 import { BarChart3, FileText, PieChart as PieChartIcon } from "lucide-react";
 import { iconTone } from "@/lib/ui-accent";
+import SortableTh from "@/components/ui/sortable-th";
+import { useTableSort, type SortAccessors } from "@/lib/table-sort";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, SB_KEY } from "@/lib/sandbox-storage";
@@ -72,6 +74,19 @@ export type { ReportFinanceRow, ReportKamarRow } from "@/lib/laporan-export-type
 const pieColors = ["#2563eb", "#16a34a", "#dc2626"];
 const LOKASI_SEMUA = "Semua Lokasi";
 const UNIT_SEMUA = "Semua Blok/Unit";
+
+const PL_TABLE_SORT: SortAccessors<PlTableRow, "pemasukan" | "pengeluaran" | "saldo" | "keterangan"> = {
+  pemasukan: (r) => r.pemasukan,
+  pengeluaran: (r) => r.pengeluaran,
+  saldo: (r) => r.saldo,
+  keterangan: (r) => r.keterangan,
+};
+
+/** Baris TOTAL dan setelahnya tetap di bawah; hanya baris rincian di atasnya yang ikut sortir. */
+function splitPlRowsAtTotal(rows: PlTableRow[]): { body: PlTableRow[]; tail: PlTableRow[] } {
+  const i = rows.findIndex((r) => r.isTotal);
+  return i < 0 ? { body: rows, tail: [] } : { body: rows.slice(0, i), tail: rows.slice(i) };
+}
 
 type PlTableRow = {
   pemasukan: number;
@@ -670,6 +685,19 @@ export default function LaporanPageClient({
     return rows;
   }, [filteredFinance]);
 
+  const plKosSplit = useMemo(() => splitPlRowsAtTotal(plKosTableRows), [plKosTableRows]);
+  const plKosSort = useTableSort(plKosSplit.body, PL_TABLE_SORT);
+  const plKosDisplayRows = useMemo(
+    () => [...plKosSort.sortedRows, ...plKosSplit.tail],
+    [plKosSort.sortedRows, plKosSplit.tail]
+  );
+  const plManajemenSplit = useMemo(() => splitPlRowsAtTotal(plManajemenTableRows), [plManajemenTableRows]);
+  const plManajemenSort = useTableSort(plManajemenSplit.body, PL_TABLE_SORT);
+  const plManajemenDisplayRows = useMemo(
+    () => [...plManajemenSort.sortedRows, ...plManajemenSplit.tail],
+    [plManajemenSort.sortedRows, plManajemenSplit.tail]
+  );
+
   const statusPieData = useMemo(() => {
     const counts = {
       Occupied: 0,
@@ -923,19 +951,19 @@ export default function LaporanPageClient({
 
         <section className={lapSectionClass}>
           <h2 className={lapSectionTitleClass}>Tabel P&amp;L Kos</h2>
-          <PlTableMobileCards rows={plKosTableRows} />
+          <PlTableMobileCards rows={plKosDisplayRows} />
           <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full border-separate border-spacing-0 overflow-hidden rounded-2xl border border-[#d6ddff] text-sm dark:border-[#424a80]">
               <thead>
                 <tr className="bg-[#eef2ff] text-left text-[#4457a6] dark:bg-[#273064] dark:text-[#dbe3ff]">
-                  <th className="px-4 py-2.5 font-semibold">Pemasukan</th>
-                  <th className="px-4 py-2.5 font-semibold">Pengeluaran</th>
-                  <th className="px-4 py-2.5 font-semibold">Saldo</th>
-                  <th className="px-4 py-2.5 font-semibold">Keterangan / Deskripsi</th>
+                  <SortableTh label="Pemasukan" sortKey="pemasukan" activeKey={plKosSort.sortKey} dir={plKosSort.sortDir} onSort={plKosSort.toggleSort} className="px-4 py-2.5 font-semibold" />
+                  <SortableTh label="Pengeluaran" sortKey="pengeluaran" activeKey={plKosSort.sortKey} dir={plKosSort.sortDir} onSort={plKosSort.toggleSort} className="px-4 py-2.5 font-semibold" />
+                  <SortableTh label="Saldo" sortKey="saldo" activeKey={plKosSort.sortKey} dir={plKosSort.sortDir} onSort={plKosSort.toggleSort} className="px-4 py-2.5 font-semibold" />
+                  <SortableTh label="Keterangan / Deskripsi" sortKey="keterangan" activeKey={plKosSort.sortKey} dir={plKosSort.sortDir} onSort={plKosSort.toggleSort} className="px-4 py-2.5 font-semibold" />
                 </tr>
               </thead>
               <tbody>
-                {plKosTableRows.map((row, idx) => (
+                {plKosDisplayRows.map((row, idx) => (
                   <tr
                     key={`pl-kos-${idx}`}
                     className={`border-t border-[#e0e6ff] dark:border-[#39437a] ${
@@ -957,19 +985,19 @@ export default function LaporanPageClient({
 
         <section className={lapSectionClass}>
           <h2 className={lapSectionTitleClass}>Tabel P&amp;L Manajemen</h2>
-          <PlTableMobileCards rows={plManajemenTableRows} />
+          <PlTableMobileCards rows={plManajemenDisplayRows} />
           <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full border-separate border-spacing-0 overflow-hidden rounded-2xl border border-[#d6ddff] text-sm dark:border-[#424a80]">
               <thead>
                 <tr className="bg-[#eef2ff] text-left text-[#4457a6] dark:bg-[#273064] dark:text-[#dbe3ff]">
-                  <th className="px-4 py-2.5 font-semibold">Pemasukan</th>
-                  <th className="px-4 py-2.5 font-semibold">Pengeluaran</th>
-                  <th className="px-4 py-2.5 font-semibold">Saldo</th>
-                  <th className="px-4 py-2.5 font-semibold">Keterangan / Deskripsi</th>
+                  <SortableTh label="Pemasukan" sortKey="pemasukan" activeKey={plManajemenSort.sortKey} dir={plManajemenSort.sortDir} onSort={plManajemenSort.toggleSort} className="px-4 py-2.5 font-semibold" />
+                  <SortableTh label="Pengeluaran" sortKey="pengeluaran" activeKey={plManajemenSort.sortKey} dir={plManajemenSort.sortDir} onSort={plManajemenSort.toggleSort} className="px-4 py-2.5 font-semibold" />
+                  <SortableTh label="Saldo" sortKey="saldo" activeKey={plManajemenSort.sortKey} dir={plManajemenSort.sortDir} onSort={plManajemenSort.toggleSort} className="px-4 py-2.5 font-semibold" />
+                  <SortableTh label="Keterangan / Deskripsi" sortKey="keterangan" activeKey={plManajemenSort.sortKey} dir={plManajemenSort.sortDir} onSort={plManajemenSort.toggleSort} className="px-4 py-2.5 font-semibold" />
                 </tr>
               </thead>
               <tbody>
-                {plManajemenTableRows.map((row, idx) => (
+                {plManajemenDisplayRows.map((row, idx) => (
                   <tr
                     key={`pl-manajemen-${idx}`}
                     className={`border-t border-[#e0e6ff] dark:border-[#39437a] ${

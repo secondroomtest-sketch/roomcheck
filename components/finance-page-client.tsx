@@ -20,6 +20,8 @@ import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import LaporanLengkapChoiceModal from "@/components/laporan-lengkap-choice-modal";
 import StatusBadge from "@/components/ui/status-badge";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
+import SortableTh from "@/components/ui/sortable-th";
+import { parseNominal, useTableSort, type SortAccessors } from "@/lib/table-sort";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
@@ -209,6 +211,19 @@ function sortFinanceRowsDesc(rows: FinanceRow[]): FinanceRow[] {
   });
 }
 
+const FINANCE_TABLE_SORT: SortAccessors<
+  FinanceRow,
+  "tanggal" | "pelaporanBulan" | "nota" | "kategori" | "pos" | "nominal" | "status"
+> = {
+  tanggal: (r) => r.tanggal,
+  pelaporanBulan: (r) => (r.pelaporanBulan ?? "").trim().slice(0, 7),
+  nota: (r) => (r.noNota ? notaNumericKey(r.noNota) : null),
+  kategori: (r) => r.kategori,
+  pos: (r) => r.pos,
+  nominal: (r) => parseNominal(r.nominal),
+  status: (r) => (r.kategori === "Pemasukan" ? "Paid" : "Paid Out"),
+};
+
 function collectFinanceBoundaryYmds(
   rows: FinanceRow[],
   mode: "tanggal" | "pelaporan"
@@ -357,6 +372,7 @@ function FinanceRiwayatTableBlock({
       : rows;
     return sortFinanceRowsDesc(source);
   }, [notaQuery, rows]);
+  const tableSort = useTableSort(visibleRows, FINANCE_TABLE_SORT);
 
   const sumNominal = sumNominalRows(visibleRows);
   const emptyMessage = notaQuery.trim()
@@ -494,7 +510,7 @@ function FinanceRiwayatTableBlock({
           </div>
         ) : (
           <>
-            {visibleRows.map((row) => (
+            {tableSort.sortedRows.map((row) => (
               <article
                 key={row.id}
                 className={`rounded-2xl border border-[#eadcc9] bg-[#fffdf9] p-4 shadow-sm dark:border-[#3d2f22] dark:bg-[#2b2016] ${
@@ -573,13 +589,13 @@ function FinanceRiwayatTableBlock({
         <table className="min-w-full text-left text-sm">
           <thead className="sticky top-0 z-[1] bg-[#f8efe2] dark:bg-[#2b2016]">
             <tr className="text-xs uppercase tracking-[0.13em] text-[#8f724d] dark:text-[#c8a97f]">
-              <th className="px-3 py-2.5">Tanggal</th>
-              <th className="px-3 py-2.5">Bulan P&amp;L</th>
-              <th className="px-3 py-2.5">Nota</th>
-              <th className="px-3 py-2.5">Kategori</th>
-              <th className="px-3 py-2.5">POS</th>
-              <th className="px-3 py-2.5">Nominal</th>
-              <th className="px-3 py-2.5">Status</th>
+              <SortableTh label="Tanggal" sortKey="tanggal" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
+              <SortableTh label="Bulan P&L" sortKey="pelaporanBulan" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
+              <SortableTh label="Nota" sortKey="nota" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
+              <SortableTh label="Kategori" sortKey="kategori" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
+              <SortableTh label="POS" sortKey="pos" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
+              <SortableTh label="Nominal" sortKey="nominal" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
+              <SortableTh label="Status" sortKey="status" activeKey={tableSort.sortKey} dir={tableSort.sortDir} onSort={tableSort.toggleSort} className="px-3 py-2.5" />
             </tr>
           </thead>
           <tbody>
@@ -598,7 +614,7 @@ function FinanceRiwayatTableBlock({
                 </td>
               </tr>
             ) : (
-              visibleRows.map((row) => (
+              tableSort.sortedRows.map((row) => (
                 <tr
                   key={row.id}
                   className={`border-t border-[#efe2d1] dark:border-[#33261b] ${

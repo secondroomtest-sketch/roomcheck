@@ -20,6 +20,8 @@ import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import BrandLoader from "@/components/ui/brand-loader";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
+import SortableTh from "@/components/ui/sortable-th";
+import { useTableSort, type SortAccessors } from "@/lib/table-sort";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useSupabaseSessionHydrated } from "@/components/supabase-session-ready";
 import { useCloudDataResyncTick } from "@/components/cloud-resync-hook";
@@ -36,6 +38,15 @@ import {
 
 /** Cukup untuk merge opsi demo (hindari impor sirkular ke penghuni-page-client). */
 type PenghuniSandboxLite = { lokasiKos: string; unitBlok: string };
+
+const KAMAR_AGGREGATION_SORT: SortAccessors<
+  { lokasiKos: string; unitBlok: string; jumlah: number },
+  "lokasi" | "unit" | "jumlah"
+> = {
+  lokasi: (r) => r.lokasiKos,
+  unit: (r) => r.unitBlok,
+  jumlah: (r) => r.jumlah,
+};
 
 type PenghuniJsonRow = {
   status?: string;
@@ -377,6 +388,7 @@ export default function KamarPageClient({
       return a.unitBlok.localeCompare(b.unitBlok, "id");
     });
   }, [roomsForSummaryTable]);
+  const kamarAggregationSort = useTableSort(kamarAggregationRows, KAMAR_AGGREGATION_SORT);
 
   const kamarAggregationTotal = roomsForSummaryTable.length;
 
@@ -991,9 +1003,9 @@ export default function KamarPageClient({
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-[#f8efe2] dark:bg-[#2b2016]">
                   <tr className="text-xs uppercase tracking-[0.12em] text-[#8f724d] dark:text-[#c8a97f]">
-                    <th className="px-4 py-3 font-semibold">Lokasi</th>
-                    <th className="px-4 py-3 font-semibold">Blok / Unit</th>
-                    <th className="px-4 py-3 text-right font-semibold">Jumlah kamar</th>
+                    <SortableTh label="Lokasi" sortKey="lokasi" activeKey={kamarAggregationSort.sortKey} dir={kamarAggregationSort.sortDir} onSort={kamarAggregationSort.toggleSort} className="px-4 py-3 font-semibold" />
+                    <SortableTh label="Blok / Unit" sortKey="unit" activeKey={kamarAggregationSort.sortKey} dir={kamarAggregationSort.sortDir} onSort={kamarAggregationSort.toggleSort} className="px-4 py-3 font-semibold" />
+                    <SortableTh label="Jumlah kamar" sortKey="jumlah" activeKey={kamarAggregationSort.sortKey} dir={kamarAggregationSort.sortDir} onSort={kamarAggregationSort.toggleSort} className="px-4 py-3 text-right font-semibold" align="right" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1007,7 +1019,7 @@ export default function KamarPageClient({
                       </td>
                     </tr>
                   ) : (
-                    kamarAggregationRows.map((row) => (
+                    kamarAggregationSort.sortedRows.map((row) => (
                       <tr
                         key={`${row.lokasiKos}-${row.unitBlok}`}
                         className="border-t border-[#efe2d1] dark:border-[#33261b]"

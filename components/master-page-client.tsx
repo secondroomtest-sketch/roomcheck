@@ -18,6 +18,8 @@ import ActionButtonWithIcon from "@/components/ui/action-button-with-icon";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
 import StatusBadge from "@/components/ui/status-badge";
+import SortableTh from "@/components/ui/sortable-th";
+import { useTableSort, type SortAccessors } from "@/lib/table-sort";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
 import { readSandboxJson, writeSandboxJson, SB_KEY, newSandboxId } from "@/lib/sandbox-storage";
@@ -160,6 +162,25 @@ const DEMO_SEED_BLOK: BlokRow[] = [
   { id: "sb-blk-bandung-a", lokasiId: "sb-lok-bandung", namaBlok: "Blok A" },
 ];
 
+function financeLingkupLabel(tipe: FinanceType): string {
+  if (isPengeluaranTipe(tipe)) return pengeluaranScopeForFinanceTipe(tipe) === "manajemen" ? "Manajemen" : "Kos";
+  if (isPemasukanTipe(tipe)) return pemasukanScopeForFinanceTipe(tipe) === "kos" ? "Kos" : "Manajemen";
+  return "—";
+}
+
+const MASTER_POS_SORT: SortAccessors<FinanceKategoriRow, "tipe" | "namaPos" | "lingkup"> = {
+  tipe: (r) => r.tipe,
+  namaPos: (r) => r.namaPos,
+  lingkup: (r) => financeLingkupLabel(r.tipe),
+};
+
+const MASTER_USERS_SORT: SortAccessors<UserProfileRow, "nama" | "login" | "hp" | "role"> = {
+  nama: (r) => r.nama,
+  login: (r) => loginDisplayPrimary(r),
+  hp: (r) => r.noHp,
+  role: (r) => r.role,
+};
+
 function withDemoMasterSeed(blob: MasterSandboxBlob): MasterSandboxBlob {
   const lokasi = blob.lokasiData.length > 0 ? blob.lokasiData : DEMO_SEED_LOKASI;
   const existingLokasiIds = new Set(lokasi.map((l) => l.id));
@@ -197,6 +218,21 @@ export default function MasterPageClient({
   const [passwordLogRows, setPasswordLogRows] = useState<PasswordChangeLogRow[]>([]);
 
   const userNameById = useMemo(() => new Map(usersData.map((u) => [u.id, u.nama])), [usersData]);
+
+  const posTableSort = useTableSort(financeData, MASTER_POS_SORT);
+  const usersTableSort = useTableSort(usersData, MASTER_USERS_SORT);
+  const passwordLogSortAccessors = useMemo<
+    SortAccessors<PasswordChangeLogRow, "waktu" | "pengguna" | "sumber" | "keterangan">
+  >(
+    () => ({
+      waktu: (r) => r.createdAt,
+      pengguna: (r) => userNameById.get(r.subjectUserId) ?? r.subjectUserId,
+      sumber: (r) => r.source,
+      keterangan: (r) => r.detail,
+    }),
+    [userNameById]
+  );
+  const passwordLogSort = useTableSort(passwordLogRows, passwordLogSortAccessors);
 
   const [financeForm, setFinanceForm] = useState<{
     tipe: FinanceType;
@@ -1116,7 +1152,7 @@ export default function MasterPageClient({
               Di HP: kartu per baris. Di tablet ke atas: tabel.
             </p>
             <div className="space-y-3 md:hidden">
-              {financeData.map((row) => (
+              {posTableSort.sortedRows.map((row) => (
                 <article
                   key={row.id}
                   className="rounded-2xl border border-[#d6ddff] bg-[#f7f8ff]/90 p-4 dark:border-[#424a80] dark:bg-[#1b1f3d]/90"
@@ -1169,14 +1205,14 @@ export default function MasterPageClient({
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-[#f7f8ff] dark:bg-[#1b1f3d]">
                   <tr className="text-xs uppercase tracking-[0.12em] text-[#5d6fc0]">
-                    <th className="px-3 py-2.5">Tipe</th>
-                    <th className="px-3 py-2.5">Nama POS</th>
-                    <th className="px-3 py-2.5">Lingkup</th>
+                    <SortableTh label="Tipe" sortKey="tipe" activeKey={posTableSort.sortKey} dir={posTableSort.sortDir} onSort={posTableSort.toggleSort} className="px-3 py-2.5" />
+                    <SortableTh label="Nama POS" sortKey="namaPos" activeKey={posTableSort.sortKey} dir={posTableSort.sortDir} onSort={posTableSort.toggleSort} className="px-3 py-2.5" />
+                    <SortableTh label="Lingkup" sortKey="lingkup" activeKey={posTableSort.sortKey} dir={posTableSort.sortDir} onSort={posTableSort.toggleSort} className="px-3 py-2.5" />
                     <th className="px-3 py-2.5">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {financeData.map((row) => (
+                  {posTableSort.sortedRows.map((row) => (
                     <tr key={row.id} className="border-t border-[#d6ddff] dark:border-[#424a80]">
                       <td className="max-w-[min(12rem,50vw)] px-3 py-2.5 align-top">
                         <StatusBadge status={row.tipe} />
@@ -1597,7 +1633,7 @@ export default function MasterPageClient({
               Di HP: kartu per pengguna. Di layar lebar: tabel.
             </p>
             <div className="space-y-3 md:hidden">
-              {usersData.map((row) => {
+              {usersTableSort.sortedRows.map((row) => {
                 const isSuper = row.role === "super_admin";
                 const canEdit = canMutateMasterUsers && (!isSuper || row.id === currentUserId);
                 const canDelete = canMutateMasterUsers && !isSuper && row.id !== currentUserId;
@@ -1645,15 +1681,15 @@ export default function MasterPageClient({
               <table className="min-w-full table-fixed text-left text-sm">
                 <thead className="bg-[#f7f8ff] dark:bg-[#1b1f3d]">
                   <tr className="text-xs uppercase tracking-[0.12em] text-[#5d6fc0]">
-                    <th className="w-[18%] px-3 py-2.5">Nama</th>
-                    <th className="w-[28%] px-3 py-2.5">Username / Login</th>
-                    <th className="w-[14%] px-3 py-2.5">HP</th>
-                    <th className="w-[14%] px-3 py-2.5">Role</th>
+                    <SortableTh label="Nama" sortKey="nama" activeKey={usersTableSort.sortKey} dir={usersTableSort.sortDir} onSort={usersTableSort.toggleSort} className="w-[18%] px-3 py-2.5" />
+                    <SortableTh label="Username / Login" sortKey="login" activeKey={usersTableSort.sortKey} dir={usersTableSort.sortDir} onSort={usersTableSort.toggleSort} className="w-[28%] px-3 py-2.5" />
+                    <SortableTh label="HP" sortKey="hp" activeKey={usersTableSort.sortKey} dir={usersTableSort.sortDir} onSort={usersTableSort.toggleSort} className="w-[14%] px-3 py-2.5" />
+                    <SortableTh label="Role" sortKey="role" activeKey={usersTableSort.sortKey} dir={usersTableSort.sortDir} onSort={usersTableSort.toggleSort} className="w-[14%] px-3 py-2.5" />
                     <th className="px-3 py-2.5">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {usersData.map((row) => {
+                  {usersTableSort.sortedRows.map((row) => {
                     const isSuper = row.role === "super_admin";
                     const canEdit =
                       canMutateMasterUsers && (!isSuper || row.id === currentUserId);
@@ -1730,7 +1766,7 @@ export default function MasterPageClient({
             ) : (
               <>
                 <div className="space-y-3 md:hidden">
-                  {passwordLogRows.map((log) => {
+                  {passwordLogSort.sortedRows.map((log) => {
                     const waktu =
                       log.createdAt && Number.isFinite(Date.parse(log.createdAt))
                         ? new Date(log.createdAt).toLocaleString("id-ID")
@@ -1759,14 +1795,14 @@ export default function MasterPageClient({
                   <table className="min-w-[min(100%,52rem)] text-left text-sm">
                     <thead className="bg-[#f7f8ff] dark:bg-[#1b1f3d]">
                       <tr className="text-[0.65rem] uppercase tracking-[0.12em] text-[#5d6fc0]">
-                        <th className="whitespace-nowrap px-3 py-2">Waktu</th>
-                        <th className="min-w-[7rem] px-3 py-2">Pengguna</th>
-                        <th className="min-w-[6rem] px-3 py-2">Sumber</th>
-                        <th className="min-w-[12rem] px-3 py-2">Keterangan</th>
+                        <SortableTh label="Waktu" sortKey="waktu" activeKey={passwordLogSort.sortKey} dir={passwordLogSort.sortDir} onSort={passwordLogSort.toggleSort} className="whitespace-nowrap px-3 py-2" />
+                        <SortableTh label="Pengguna" sortKey="pengguna" activeKey={passwordLogSort.sortKey} dir={passwordLogSort.sortDir} onSort={passwordLogSort.toggleSort} className="min-w-[7rem] px-3 py-2" />
+                        <SortableTh label="Sumber" sortKey="sumber" activeKey={passwordLogSort.sortKey} dir={passwordLogSort.sortDir} onSort={passwordLogSort.toggleSort} className="min-w-[6rem] px-3 py-2" />
+                        <SortableTh label="Keterangan" sortKey="keterangan" activeKey={passwordLogSort.sortKey} dir={passwordLogSort.sortDir} onSort={passwordLogSort.toggleSort} className="min-w-[12rem] px-3 py-2" />
                       </tr>
                     </thead>
                     <tbody>
-                      {passwordLogRows.map((log) => {
+                      {passwordLogSort.sortedRows.map((log) => {
                         const waktu =
                           log.createdAt && Number.isFinite(Date.parse(log.createdAt))
                             ? new Date(log.createdAt).toLocaleString("id-ID")

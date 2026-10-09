@@ -40,6 +40,8 @@ import BrandLoader from "@/components/ui/brand-loader";
 import RefreshToolbarButton from "@/components/ui/refresh-toolbar-button";
 import StatusBadge from "@/components/ui/status-badge";
 import SectionTitleWithIcon from "@/components/ui/section-title-with-icon";
+import SortableTh from "@/components/ui/sortable-th";
+import { parseNominal, useTableSort, type SortAccessors } from "@/lib/table-sort";
 import { downloadPenghuniListsPdf } from "@/lib/penghuni-checkout-survey-pdf";
 import { useSandboxMode } from "@/components/sandbox-mode-provider";
 import { useAppFeedback } from "@/components/app-feedback-provider";
@@ -301,6 +303,29 @@ function sortDateKey(value: string) {
   const t = new Date(value).getTime();
   return Number.isNaN(t) ? 0 : t;
 }
+
+const PENGHUNI_TABLE_SORT: SortAccessors<
+  PenghuniRow,
+  "nama" | "lokasi" | "unit" | "status" | "checkIn" | "checkOut"
+> = {
+  nama: (r) => r.namaLengkap,
+  lokasi: (r) => r.lokasiKos,
+  unit: (r) => `${r.unitBlok ?? ""} ${r.noKamar ?? ""}`.trim(),
+  status: (r) => r.status,
+  checkIn: (r) => r.tglCheckIn,
+  checkOut: (r) => r.tglCheckOut,
+};
+
+const SURVEY_TABLE_SORT: SortAccessors<
+  SurveyCalonRow,
+  "nama" | "lokasi" | "unit" | "rencanaCheckIn" | "negosiasi"
+> = {
+  nama: (r) => r.namaLengkap,
+  lokasi: (r) => r.lokasiKos,
+  unit: (r) => r.unitBlok,
+  rencanaCheckIn: (r) => r.rencanaCheckIn,
+  negosiasi: (r) => parseNominal(r.negosiasiHarga),
+};
 
 function mapDbRowToSurvey(row: Record<string, unknown>): SurveyCalonRow {
   return {
@@ -892,6 +917,10 @@ export default function PenghuniPageClient({
     copy.sort((a, b) => sortDateKey(a.rencanaCheckIn) - sortDateKey(b.rencanaCheckIn));
     return copy;
   }, [filteredSurveyRows]);
+
+  const penghuniTableSort = useTableSort(displayedPenghuniRows, PENGHUNI_TABLE_SORT);
+  const historyTableSort = useTableSort(sortedHistoryByCheckOut, PENGHUNI_TABLE_SORT);
+  const surveyTableSort = useTableSort(sortedSurveyRows, SURVEY_TABLE_SORT);
 
   const availableRoomNumbers = useMemo(() => {
     const source = localDemoMode ? kamarSandboxRows : cloudKamarRows;
@@ -2904,12 +2933,12 @@ export default function PenghuniPageClient({
             <table className="min-w-full text-left text-sm">
               <thead className="sticky top-0 z-30 text-xs uppercase tracking-[0.12em] text-[#8f724d] dark:text-[#c8a97f]">
                 <tr>
-                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Nama</th>
-                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Lokasi</th>
-                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Unit / Kamar</th>
-                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Status</th>
-                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Check-in</th>
-                  <th className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">Check-out</th>
+                  <SortableTh label="Nama" sortKey="nama" activeKey={penghuniTableSort.sortKey} dir={penghuniTableSort.sortDir} onSort={penghuniTableSort.toggleSort} className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]" />
+                  <SortableTh label="Lokasi" sortKey="lokasi" activeKey={penghuniTableSort.sortKey} dir={penghuniTableSort.sortDir} onSort={penghuniTableSort.toggleSort} className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]" />
+                  <SortableTh label="Unit / Kamar" sortKey="unit" activeKey={penghuniTableSort.sortKey} dir={penghuniTableSort.sortDir} onSort={penghuniTableSort.toggleSort} className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]" />
+                  <SortableTh label="Status" sortKey="status" activeKey={penghuniTableSort.sortKey} dir={penghuniTableSort.sortDir} onSort={penghuniTableSort.toggleSort} className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]" />
+                  <SortableTh label="Check-in" sortKey="checkIn" activeKey={penghuniTableSort.sortKey} dir={penghuniTableSort.sortDir} onSort={penghuniTableSort.toggleSort} className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]" />
+                  <SortableTh label="Check-out" sortKey="checkOut" activeKey={penghuniTableSort.sortKey} dir={penghuniTableSort.sortDir} onSort={penghuniTableSort.toggleSort} className="bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]" />
                   <th className="min-w-[10.5rem] whitespace-nowrap bg-[#f8efe2] px-3 py-2.5 dark:bg-[#2b2016]">
                     Aksi
                   </th>
@@ -2937,7 +2966,7 @@ export default function PenghuniPageClient({
                     </td>
                   </tr>
                 ) : (
-                  displayedPenghuniRows.map((row) => {
+                  penghuniTableSort.sortedRows.map((row) => {
                     const isHistoryRow = row.status === "History";
                     const isPublicBooking = row.bookingSource === "public_form";
                     const rowTone = isHistoryRow
@@ -3075,10 +3104,10 @@ export default function PenghuniPageClient({
               <table className="min-w-full text-left text-sm">
                 <thead className="sticky top-0 bg-zinc-100 text-xs uppercase tracking-[0.12em] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                   <tr>
-                    <th className="px-3 py-2">Nama</th>
-                    <th className="px-3 py-2">Lokasi</th>
-                    <th className="px-3 py-2">Unit / Kamar</th>
-                    <th className="px-3 py-2">Check-out</th>
+                    <SortableTh label="Nama" sortKey="nama" activeKey={historyTableSort.sortKey} dir={historyTableSort.sortDir} onSort={historyTableSort.toggleSort} className="px-3 py-2" />
+                    <SortableTh label="Lokasi" sortKey="lokasi" activeKey={historyTableSort.sortKey} dir={historyTableSort.sortDir} onSort={historyTableSort.toggleSort} className="px-3 py-2" />
+                    <SortableTh label="Unit / Kamar" sortKey="unit" activeKey={historyTableSort.sortKey} dir={historyTableSort.sortDir} onSort={historyTableSort.toggleSort} className="px-3 py-2" />
+                    <SortableTh label="Check-out" sortKey="checkOut" activeKey={historyTableSort.sortKey} dir={historyTableSort.sortDir} onSort={historyTableSort.toggleSort} className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -3089,7 +3118,7 @@ export default function PenghuniPageClient({
                       </td>
                     </tr>
                   ) : (
-                    sortedHistoryByCheckOut.map((row) => (
+                    historyTableSort.sortedRows.map((row) => (
                       <tr
                         key={row.id}
                         className="cursor-pointer transition hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
@@ -3148,11 +3177,11 @@ export default function PenghuniPageClient({
           <table className="min-w-full text-left text-sm">
             <thead className="sticky top-0 z-30 text-xs uppercase tracking-[0.12em] text-[#8f6a2d] dark:text-[#dcb97a]">
               <tr>
-                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Nama</th>
-                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Lokasi</th>
-                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Unit</th>
-                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Rencana CI</th>
-                <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">Negosiasi</th>
+                <SortableTh label="Nama" sortKey="nama" activeKey={surveyTableSort.sortKey} dir={surveyTableSort.sortDir} onSort={surveyTableSort.toggleSort} className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]" />
+                <SortableTh label="Lokasi" sortKey="lokasi" activeKey={surveyTableSort.sortKey} dir={surveyTableSort.sortDir} onSort={surveyTableSort.toggleSort} className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]" />
+                <SortableTh label="Unit" sortKey="unit" activeKey={surveyTableSort.sortKey} dir={surveyTableSort.sortDir} onSort={surveyTableSort.toggleSort} className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]" />
+                <SortableTh label="Rencana CI" sortKey="rencanaCheckIn" activeKey={surveyTableSort.sortKey} dir={surveyTableSort.sortDir} onSort={surveyTableSort.toggleSort} className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]" />
+                <SortableTh label="Negosiasi" sortKey="negosiasi" activeKey={surveyTableSort.sortKey} dir={surveyTableSort.sortDir} onSort={surveyTableSort.toggleSort} className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]" />
                 <th className="bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">WA</th>
                 <th className="min-w-[9rem] whitespace-nowrap bg-amber-50 px-2 py-2.5 dark:bg-[#2f2618]">
                   Aksi
@@ -3167,7 +3196,7 @@ export default function PenghuniPageClient({
                   </td>
                 </tr>
               ) : (
-                sortedSurveyRows.map((row) => (
+                surveyTableSort.sortedRows.map((row) => (
                   <tr
                     key={row.id}
                     className="cursor-help border-t border-amber-100/90 dark:border-[#3d2f22]"
